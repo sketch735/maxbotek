@@ -24,7 +24,6 @@ def admin_ticket_keyboard(ticket_id: int, ticket_type: str):
         [InlineKeyboardButton(text="🟡 Взять в работу", callback_data=f"take:{ticket_id}")]
     ]
     
-    # Кнопка запроса кода выводится только для заявок на номера (MAX)
     if ticket_type == "MAX":
         buttons.append([InlineKeyboardButton(text="💬 Запросить код", callback_data=f"ask_code:{ticket_id}")])
         

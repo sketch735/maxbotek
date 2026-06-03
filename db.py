@@ -4,7 +4,8 @@ from datetime import datetime
 DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
-# ==================== ТАБЛИЦЫ ====================\ncur.execute("""CREATE TABLE IF NOT EXISTS users (
+# ==================== ТАБЛИЦЫ ====================
+cur.execute("""CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
     created_at TEXT,
     balance REAL DEFAULT 0
@@ -23,7 +24,8 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
 
 DB.commit()
 
-# ==================== ФУНКЦИИ ====================\ndef create_user(tg_id):
+# ==================== ФУНКЦИИ ====================
+def create_user(tg_id):
     cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)", 
                 (tg_id, datetime.utcnow().isoformat()))
     DB.commit()

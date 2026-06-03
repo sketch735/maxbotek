@@ -7,7 +7,8 @@ from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
-from aiogram.fsm.context import FSMContext\nfrom aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from db import (
     create_user,
@@ -97,7 +98,6 @@ async def process_phone(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Отправка администратору
     await bot.send_message(
         ADMIN_ID,
         f"🆕 <b>Новая заявка #{ticket_id} [MAX]</b>\n"
@@ -110,10 +110,8 @@ async def process_phone(message: Message, state: FSMContext):
 # ---- 1.2 СДАТЬ КАРТУ ----
 @dp.callback_query(F.data == "card")
 async def hand_over_card(call: CallbackQuery):
-    # Автоматически создаем фоновую заявку, чтобы админ мог её подтвердить через бота
     ticket_id = create_ticket(call.from_user.id, "CARD", data="Сделка в ЛС")
     
-    # Получаем юзернейм админа
     try:
         admin_chat = await bot.get_chat(ADMIN_ID)
         admin_username = admin_chat.username if admin_chat.username else "admin"
@@ -130,7 +128,6 @@ async def hand_over_card(call: CallbackQuery):
         parse_mode="HTML"
     )
     
-    # Уведомляем админа о намерении сдать карту
     await bot.send_message(
         ADMIN_ID,
         f"💳 <b>Пользователь хочет сдать карту! Заявка #{ticket_id}</b>\n"
@@ -149,7 +146,6 @@ async def show_profile(call: CallbackQuery):
     
     balance = user[2] if user else 0.0
     
-    # Считаем статистику по статусам
     waiting_count = len([t for t in tickets if t[3] == 'new'])
     processing_count = len([t for t in tickets if t[3] == 'processing'])
     done_count = len([t for t in tickets if t[3] == 'done'])
@@ -167,7 +163,7 @@ async def show_profile(call: CallbackQuery):
     )
     await call.answer()
 
-# ---- 1.3 ВЫВОД СРЕДСТВ (ЗАЩИТА ОТ КРАЖИ) ----
+# ---- 1.3 ВЫВОД СРЕДСТВ ----
 @dp.callback_query(F.data == "withdraw")
 async def withdraw_start(call: CallbackQuery, state: FSMContext):
     user = get_user(call.from_user.id)
@@ -203,7 +199,6 @@ async def process_withdraw_amount(message: Message, state: FSMContext):
         await message.answer("❌ Минимальная сумма вывода составляет $3.")
         return
 
-    # СТРОГАЯ ПРОВЕРКА (1.3): Сумма не может превышать текущий баланс
     if amount > balance:
         await message.answer(
             f"❌ <b>Ошибка безопасности!</b>\n"
@@ -214,7 +209,6 @@ async def process_withdraw_amount(message: Message, state: FSMContext):
         )
         return
 
-    # Списываем баланс сразу во избежание повторных запросов до обработки заявки
     update_user_balance(message.from_user.id, -amount)
     await state.clear()
     
@@ -223,12 +217,11 @@ async def process_withdraw_amount(message: Message, state: FSMContext):
     await message.answer(
         f"✅ <b>Заявка на вывод #{ticket_id} на сумму {amount} USDT успешно создана!</b>\n\n"
         f"Переводы выполняются в автоматическом режиме с 20:00 до 23:00 (МСК).\n"
-        f"⚠️ <i>Убедитесь, что ваш Crypto Bot активен и не заблокирован. Чеки выдаются строго на ваш аккаунт.</i>",
+        f"⚠️ <i>Убедитесь, что ваш Crypto Bot активен и не заблокирован.</i>",
         reply_markup=back_to_main(),
         parse_mode="HTML"
     )
     
-    # Сообщение админу
     await bot.send_message(
         ADMIN_ID,
         f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
@@ -259,7 +252,6 @@ async def admin_ask_code(call: CallbackQuery):
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     
-    # 1.1 Пишет пользователю, чтобы тот посмотрел код
     await bot.send_message(
         t[1], 
         f"⚠️ <b>Внимание!</b> Администратор проверяет заявку #{tid}.\n"
@@ -283,7 +275,6 @@ async def admin_done_ticket(call: CallbackQuery):
         payout = MAX_PRICE
     elif t[2] == "CARD":
         payout = CARD_PRICE
-    # Для вывода баланс уже был вычтен при создании, выплачиваем молча
     
     complete_ticket(tid, payout)
     
@@ -306,7 +297,6 @@ async def admin_reject_ticket(call: CallbackQuery):
         await call.answer("Нельзя отменить уже выполненную заявку!", show_alert=True)
         return
         
-    # Если это был вывод, возвращаем деньги на баланс обратно пользователю
     if t[2] == "WITHDRAW":
         try:
             amount_str = t[4].replace("Вывод ", "").replace(" USDT", "").strip()
