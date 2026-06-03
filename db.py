@@ -1,7 +1,8 @@
 import sqlite3
 from datetime import datetime
 
-DB = sqlite3.connect("bot.db", check_same_thread=False)
+# Изменили имя файла, чтобы база создалась автоматически с нужными колонками
+DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
 # ==================== ТАБЛИЦЫ ====================
@@ -28,7 +29,7 @@ DB.commit()
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id):
     cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)", 
-                (datetime.utcnow().isoformat(), tg_id) if sqlite3.sqlite_version == "3.0" else (tg_id, datetime.utcnow().isoformat()))
+                (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
 
 def get_user(tg_id):
