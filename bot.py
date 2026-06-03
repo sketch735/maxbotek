@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
@@ -25,7 +26,9 @@ from keyboards import user_menu, admin_ticket_keyboard, profile_keyboard, cancel
 
 logging.basicConfig(level=logging.INFO)
 
-# === ЗАГРУЗКА ПЕРЕМЕННЫХ ===
+# Загружаем переменные из .env
+load_dotenv()
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = os.getenv("ADMIN_ID")
 
@@ -39,11 +42,9 @@ ADMIN_ID = int(ADMIN_ID)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Цены за успешную сдачу для подсчета статистики в профиле
 MAX_PRICE = 50   
 CARD_PRICE = 100 
 
-# Состояния для сбора номера MAX
 class TicketStates(StatesGroup):
     waiting_phone = State()
 
@@ -65,11 +66,9 @@ async def profile_handler(call: CallbackQuery):
     user = get_user(call.from_user.id)
     tickets = get_user_tickets(call.from_user.id)
     
-    # Считаем количество выполненных заявок каждого типа
     max_count = sum(1 for t in tickets if t[2] == "MAX" and t[3] == "done")
     card_count = sum(1 for t in tickets if t[2] == "CARD" and t[3] == "done")
     
-    # Считаем заработанную сумму в $
     max_usd = max_count * MAX_PRICE
     card_usd = card_count * CARD_PRICE
     
@@ -113,7 +112,6 @@ async def card_handler(call: CallbackQuery):
         parse_mode="HTML"
     )
     
-    # Сразу отправляем уведомление админу о новой заявке на карту
     username = f"@{call.from_user.username}" if call.from_user.username else "Нет юзернейма"
     await bot.send_message(
         ADMIN_ID,
@@ -131,7 +129,6 @@ async def process_phone(message: Message, state: FSMContext):
     ticket_id = state_data.get("ticket_id")
     phone = message.text
 
-    # Сохраняем номер телефона в поле data
     update_ticket_data(ticket_id, phone)
     
     await message.answer(
@@ -140,7 +137,6 @@ async def process_phone(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Отправляем структурированную заявку админу
     username = f"@{message.from_user.username}" if message.from_user.username else "Нет юзернейма"
     await bot.send_message(
         ADMIN_ID,
@@ -162,7 +158,6 @@ async def admin_panel(message: Message):
         return
 
     for t in tickets:
-        # Если это MAX, выводим еще и сохраненный номер телефона
         phone_info = f"\nДанные: <code>{t[4]}</code>" if t[4] else ""
         await message.answer(
             f"🆕 Ticket #{t[0]}\nТип: {t[2]}\nПользователь: {t[1]}{phone_info}",
@@ -186,7 +181,6 @@ async def done(call: CallbackQuery):
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     
-    # Начисляем соответствующую сумму в зависимости от типа заявки
     payout = MAX_PRICE if t[2] == "MAX" else CARD_PRICE
     complete_ticket(tid, payout)
     
