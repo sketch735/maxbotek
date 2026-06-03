@@ -1,12 +1,10 @@
 import sqlite3
 from datetime import datetime
 
-# Подключение к новой чистой базе данных (изменили имя, чтобы создалась автоматически)
 DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
-# ==================== ТАБЛИЦЫ ====================
-cur.execute("""CREATE TABLE IF NOT EXISTS users (
+# ==================== ТАБЛИЦЫ ====================\ncur.execute("""CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
     created_at TEXT,
     balance REAL DEFAULT 0
@@ -25,9 +23,7 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
 
 DB.commit()
 
-
-# ==================== ФУНКЦИИ ====================
-def create_user(tg_id):
+# ==================== ФУНКЦИИ ====================\ndef create_user(tg_id):
     cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)", 
                 (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
@@ -40,10 +36,10 @@ def update_user_balance(tg_id, amount):
     cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, tg_id))
     DB.commit()
 
-def create_ticket(user_id, ttype):
-    cur.execute("""INSERT INTO tickets (user_id, type, created_at) 
-                   VALUES (?, ?, ?)""", 
-                (user_id, ttype, datetime.utcnow().isoformat()))
+def create_ticket(user_id, ttype, data=None):
+    cur.execute("""INSERT INTO tickets (user_id, type, data, created_at) 
+                   VALUES (?, ?, ?, ?)""", 
+                (user_id, ttype, data, datetime.utcnow().isoformat()))
     DB.commit()
     return cur.lastrowid
 
@@ -71,8 +67,8 @@ def update_ticket_data(ticket_id, data):
     cur.execute("UPDATE tickets SET data=? WHERE id=?", (data, ticket_id))
     DB.commit()
 
-def close_ticket(ticket_id):
-    cur.execute("UPDATE tickets SET status='done', completed_at=? WHERE id=?", 
+def reject_ticket_db(ticket_id):
+    cur.execute("UPDATE tickets SET status='rejected', completed_at=? WHERE id=?", 
                 (datetime.utcnow().isoformat(), ticket_id))
     DB.commit()
 
@@ -83,6 +79,6 @@ def complete_ticket(ticket_id, amount=0):
         cur.execute("SELECT user_id FROM tickets WHERE id=?", (ticket_id,))
         result = cur.fetchone()
         if result:
-            uid = result[0]
-            cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, uid))
+            user_id = result[0]
+            cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, user_id))
     DB.commit()
