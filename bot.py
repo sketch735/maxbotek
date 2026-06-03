@@ -59,7 +59,7 @@ async def start(message: Message, state: FSMContext):
     await state.clear()
     create_user(message.from_user.id)
     await message.answer(
-        "🚀 <b>MaxRentik CRM активирован</b>\n\nВыберите действие в меню ниже:",
+        "🚀 <b>MaxRentik</b>\n\nВыберите действие в меню ниже:",
         reply_markup=user_menu(),
         parse_mode="HTML"
     )
