@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def user_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📦 Сдать MAX (РФ)", callback_data="max")],
+        [InlineKeyboardButton(text="📦 Сдать MAX ", callback_data="max")],
         [InlineKeyboardButton(text="💳 Сдать карту", callback_data="card")],
         [InlineKeyboardButton(text="👤 Профиль & Статистика", callback_data="profile")]
     ])
