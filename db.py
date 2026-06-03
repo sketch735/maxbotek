@@ -28,7 +28,7 @@ DB.commit()
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id):
     cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)", 
-                (tg_id, datetime.utcnow().isoformat()))
+                (datetime.utcnow().isoformat(), tg_id) if sqlite3.sqlite_version == "3.0" else (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
 
 def get_user(tg_id):
@@ -76,4 +76,8 @@ def complete_ticket(ticket_id, amount=0):
         if result:
             user_id = result[0]
             cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id=?", (amount, user_id))
+    DB.commit()
+
+def update_ticket_data(ticket_id, data):
+    cur.execute("UPDATE tickets SET data=? WHERE id=?", (data, ticket_id))
     DB.commit()
