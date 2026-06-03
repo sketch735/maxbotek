@@ -1,25 +1,23 @@
-# FILE: bot.py
-
 import asyncio
 import logging
 import os
+from datetime import datetime
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 from db import (
-    create_user,
-    create_ticket,
-    get_new_tickets,
-    assign_ticket,
-    close_ticket,
-    get_ticket,
-    add_message,
-    get_messages
+    create_user, get_user, create_ticket, get_ticket,
+    get_user_tickets, assign_ticket, complete_ticket,
+    add_balance, update_ticket_status
 )
-
-from keyboards import user_menu, admin_ticket
+from keyboards import (
+    user_menu, profile_keyboard, cancel_keyboard,
+    admin_ticket_keyboard
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -30,100 +28,129 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
 
-# ---------------- START ----------------
+class MaxStates(StatesGroup):
+    waiting_phone = State()
+    waiting_code = State()
+
+
+# ==================== START ====================
 @dp.message(CommandStart())
 async def start(message: Message):
     create_user(message.from_user.id)
-
     await message.answer(
-        "🚀 SaaS CRM активирован",
-        reply_markup=user_menu()
+        "👋 <b>Добро пожаловать в MaxRentik</b>\n\n"
+        "Здесь можно сдавать MAX и карты.",
+        reply_markup=user_menu(),
+        parse_mode="HTML"
     )
 
 
-# ---------------- USER CREATE ----------------
-@dp.callback_query(F.data == "max")
-async def max(call: CallbackQuery):
-    create_ticket(call.from_user.id, "MAX")
-    await call.message.answer("📦 MAX заявка создана")
+# ==================== PROFILE ====================
+@dp.callback_query(F.data == "profile")
+async def profile(call: CallbackQuery):
+    user = get_user(call.from_user.id)
+    tickets = get_user_tickets(call.from_user.id)
+    
+    max_count = sum(1 for t in tickets if t[2] == "MAX" and t[3] == "done")
+    card_count = sum(1 for t in tickets if t[2] == "CARD" and t[3] == "done")
+    balance = user[3] if user and len(user) > 3 else 0
+
+    text = f"""<b>👤 Профиль</b>
+
+🆔 <code>{call.from_user.id}</code>
+📦 MAX сдано: <b>{max_count}</b>
+💳 Карт сдано: <b>{card_count}</b>
+💰 Баланс: <b>{balance} USDT</b>"""
+
+    await call.message.edit_text(text, reply_markup=profile_keyboard(), parse_mode="HTML")
 
 
-@dp.callback_query(F.data == "card")
-async def card(call: CallbackQuery):
-    create_ticket(call.from_user.id, "CARD")
-    await call.message.answer("💳 CARD заявка создана")
+# ==================== CREATE TICKET ====================
+@dp.callback_query(F.data.in_(["max", "card"]))
+async def create_ticket_handler(call: CallbackQuery, state: FSMContext):
+    ticket_type = "MAX" if call.data == "max" else "CARD"
+    ticket_id = create_ticket(call.from_user.id, ticket_type)
 
-
-# ---------------- USER LIST ----------------
-@dp.callback_query(F.data == "my")
-async def my(call: CallbackQuery):
-    tickets = get_new_tickets()
-
-    await call.message.answer(f"📊 У вас {len(tickets)} активных заявок")
-
-
-# ---------------- ADMIN PANEL ----------------
-@dp.message(F.from_user.id == ADMIN_ID)
-async def admin(message: Message):
-    tickets = get_new_tickets()
-
-    if not tickets:
-        await message.answer("📭 Очередь пуста")
-        return
-
-    for t in tickets:
-        await message.answer(
-            f"🆕 Ticket #{t[0]}\nType: {t[2]}",
-            reply_markup=admin_ticket(t[0])
+    if ticket_type == "MAX":
+        await call.message.edit_text(
+            "📱 Отправьте номер телефона для MAX\nФормат: <code>+79xxxxxxxxx</code>",
+            parse_mode="HTML",
+            reply_markup=cancel_keyboard(ticket_id)
+        )
+        await state.set_state(MaxStates.waiting_phone)
+        await state.update_data(ticket_id=ticket_id)
+    else:
+        # CARD — сразу даём админа
+        await call.message.edit_text(
+            f"✅ Заявка на карту создана (#{ticket_id})\n\n"
+            f"Перейдите в личку к админу для дальнейшей работы:\n"
+            f"@{ (await bot.get_me()).username } или напрямую пишите админу.",
+            parse_mode="HTML"
+        )
+        # Уведомляем админа
+        await bot.send_message(
+            ADMIN_ID,
+            f"🆕 Новая CARD заявка #{ticket_id}\nПользователь: {call.from_user.id}"
         )
 
 
-# ---------------- TAKE ----------------
-@dp.callback_query(F.data.startswith("take:"))
-async def take(call: CallbackQuery):
-    tid = int(call.data.split(":")[1])
+# ==================== MAX PHONE ====================
+@dp.message(MaxStates.waiting_phone)
+async def process_phone(message: Message, state: FSMContext):
+    data = await state.get_data()
+    ticket_id = data.get("ticket_id")
+    
+    update_ticket_status(ticket_id, "phone_received", message.text)
+    
+    await message.answer(
+        "🔄 Номер принят. Ожидайте код от админа.",
+        reply_markup=cancel_keyboard(ticket_id)
+    )
+    await bot.send_message(
+        ADMIN_ID,
+        f"📱 MAX заявка #{ticket_id}\nНомер: {message.text}\nПользователь: {message.from_user.id}"
+    )
+    await state.clear()
 
-    assign_ticket(tid, call.from_user.id)
 
-    t = get_ticket(tid)
+# ==================== ADMIN PANEL ====================
+@dp.message(F.from_user.id == ADMIN_ID)
+async def admin_panel(message: Message):
+    tickets = get_user_tickets(None)  # можно улучшить
+    new_tickets = [t for t in get_user_tickets(None) if t[3] == 'new']  # упрощённо
 
-    await bot.send_message(t[1], "🟡 Взято в работу")
-
-
-# ---------------- CHAT MODE ----------------
-@dp.callback_query(F.data.startswith("chat:"))
-async def chat(call: CallbackQuery):
-    tid = int(call.data.split(":")[1])
-    await call.message.answer(f"💬 Чат с ticket #{tid} — просто пиши сообщения")
-
-
-# ---------------- MESSAGE ROUTING ----------------
-@dp.message()
-async def router(message: Message):
-    text = message.text
-
-    # если админ отвечает — надо привязать позже (упрощённо MVP логика)
-    if message.from_user.id == ADMIN_ID:
-        await message.answer("🛠 Ответ отправлен")
+    if not new_tickets:
+        await message.answer("📭 Нет новых заявок")
         return
 
-    # обычный пользователь → просто логируем
-    await message.answer("📩 Принято в обработку")
+    for t in new_tickets:
+        await message.answer(
+            f"🆕 Заявка #{t[0]} | {t[2]}\nПользователь: {t[1]}",
+            reply_markup=admin_ticket_keyboard(t[0]),
+            parse_mode="HTML"
+        )
 
 
-# ---------------- CLOSE ----------------
-@dp.callback_query(F.data.startswith("done:"))
-async def done(call: CallbackQuery):
+# ==================== CALLBACKS ====================
+@dp.callback_query(F.data.startswith("take:"))
+async def take_ticket(call: CallbackQuery):
     tid = int(call.data.split(":")[1])
-
-    close_ticket(tid)
-
+    assign_ticket(tid, call.from_user.id)
     t = get_ticket(tid)
+    await bot.send_message(t[1], "🟡 Заявка взята в работу")
+    await call.answer("✅ Взял в работу")
 
-    await bot.send_message(t[1], "✅ Заявка завершена")
+
+@dp.callback_query(F.data.startswith("done:"))
+async def done_ticket(call: CallbackQuery):
+    tid = int(call.data.split(":")[1])
+    complete_ticket(tid, 50)  # пример выплаты 50 USDT за MAX
+    t = get_ticket(tid)
+    await bot.send_message(t[1], "✅ Заявка успешно завершена! Деньги начислены.")
+    await call.answer("✅ Завершено")
 
 
-# ---------------- RUN ----------------
+# ==================== RUN ====================
 async def main():
     await dp.start_polling(bot)
 
