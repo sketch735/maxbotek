@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 
-# Изменили имя файла, чтобы база создалась автоматически с нужными колонками
+# Подключение к новой чистой базе данных (изменили имя, чтобы создалась автоматически)
 DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
@@ -36,6 +36,10 @@ def get_user(tg_id):
     cur.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
     return cur.fetchone()
 
+def update_user_balance(tg_id, amount):
+    cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, tg_id))
+    DB.commit()
+
 def create_ticket(user_id, ttype):
     cur.execute("""INSERT INTO tickets (user_id, type, created_at) 
                    VALUES (?, ?, ?)""", 
@@ -63,6 +67,10 @@ def assign_ticket(ticket_id, admin_id):
                 (admin_id, ticket_id))
     DB.commit()
 
+def update_ticket_data(ticket_id, data):
+    cur.execute("UPDATE tickets SET data=? WHERE id=?", (data, ticket_id))
+    DB.commit()
+
 def close_ticket(ticket_id):
     cur.execute("UPDATE tickets SET status='done', completed_at=? WHERE id=?", 
                 (datetime.utcnow().isoformat(), ticket_id))
@@ -75,10 +83,6 @@ def complete_ticket(ticket_id, amount=0):
         cur.execute("SELECT user_id FROM tickets WHERE id=?", (ticket_id,))
         result = cur.fetchone()
         if result:
-            user_id = result[0]
-            cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id=?", (amount, user_id))
-    DB.commit()
-
-def update_ticket_data(ticket_id, data):
-    cur.execute("UPDATE tickets SET data=? WHERE id=?", (data, ticket_id))
+            uid = result[0]
+            cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, uid))
     DB.commit()
