@@ -128,7 +128,7 @@ async def check_subscription_callback(call: CallbackQuery):
 async def start_cmd(message: Message):
     create_user(message.from_user.id)
     await message.answer(
-        "🚀 <b>MaxRentik CRM</b> активирован\n\nВыберите действие в меню ниже:",
+        "🚀 <b>MaxRentik Приветствует!</b> активирован\n\nВыберите действие в меню ниже:",
         reply_markup=user_menu(),
         parse_mode="HTML"
     )
@@ -137,7 +137,7 @@ async def start_cmd(message: Message):
 async def process_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_text(
-        "🚀 <b>MaxRentik CRM</b> активирован\n\nВыберите действие в меню ниже:",
+        "🚀 <b>MaxRentik Приветствует!</b> активирован\n\nВыберите действие в меню ниже:",
         reply_markup=user_menu(),
         parse_mode="HTML"
     )
