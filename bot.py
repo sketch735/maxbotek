@@ -52,7 +52,7 @@ ADMIN_ID = int(ADMIN_ID)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Фиксированные цены (Пункт 4: цена на MAX изменена на 4.4 $)
+# Фиксированные цены
 MAX_PRICE = 4.4   
 CARD_PRICE = 100.0 
 
@@ -61,43 +61,47 @@ class TicketStates(StatesGroup):
     waiting_phone = State()
     waiting_card = State()
     waiting_withdraw_amount = State()
-    waiting_for_code = State()  # Состояние ожидания шестизначного кода
+    waiting_for_code = State()
 
-# ==================== MIDDLEWARE ПРОВЕРКИ ПОДПИСКИ ====================
+# ==================== ИСПРАВЛЕННЫЙ MIDDLEWARE ====================
 class SubscriptionMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event: Update, data: dict):
+    async def __call__(self, handler, event: Update | Message | CallbackQuery, data: dict):
         user = None
-        if event.message:
+        
+        if hasattr(event, 'message') and event.message:           # Update
             user = event.message.from_user
-        elif event.callback_query:
-            user = event.callback_query.from_user
-            
-        if user:
-            # Администратора никогда не блокируем
-            if user.id == ADMIN_ID:
+        elif hasattr(event, 'from_user'):                         # Message или CallbackQuery
+            user = event.from_user
+
+        if not user:
+            return await handler(event, data)
+
+        # Администратора пропускаем всегда
+        if user.id == ADMIN_ID:
+            return await handler(event, data)
+
+        # Пропускаем проверку подписки
+        if isinstance(event, CallbackQuery) and event.data == "check_subscription":
+            return await handler(event, data)
+
+        try:
+            member = await data['bot'].get_chat_member(chat_id="@adteoamdkmMAX", user_id=user.id)
+            if member.status in ["member", "administrator", "creator"]:
                 return await handler(event, data)
-                
-            # Пропускаем сам callback проверки, чтобы избежать зацикливания
-            if event.callback_query and event.callback_query.data == "check_subscription":
-                return await handler(event, data)
-                
-            try:
-                # Проверка подписки на канал @adteoamdkmMAX (Бот должен быть админом в канале!)
-                member = await data['bot'].get_chat_member(chat_id="@adteoamdkmMAX", user_id=user.id)
-                if member.status in ["member", "administrator", "creator"]:
-                    return await handler(event, data)
-            except Exception as e:
-                logging.error(f"Ошибка при проверке подписки: {e}")
-            
-            # Если пользователь не подписан
-            text_msg = "⚠️ <b>Доступ заблокирован!</b>\nДля использования бота необходимо подписаться на наш Telegram-канал."
-            if event.message:
-                await event.message.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
-            elif event.callback_query:
-                await event.callback_query.message.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
-                await event.callback_query.answer()
-            return
-        return await handler(event, data)
+        except Exception as e:
+            logging.error(f"Ошибка при проверке подписки: {e}")
+
+        # Пользователь не подписан
+        text_msg = "⚠️ <b>Доступ заблокирован!</b>\nДля использования бота необходимо подписаться на наш Telegram-канал."
+        
+        if isinstance(event, Message):
+            await event.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
+        elif isinstance(event, CallbackQuery):
+            await event.message.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
+            await event.answer()
+
+        return  # Блокируем дальнейшую обработку
+
 
 # Регистрируем middleware
 dp.message.outer_middleware(SubscriptionMiddleware())
@@ -139,7 +143,7 @@ async def process_main_menu(call: CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
-# ==================== ПРОФИЛЬ И ВЕЧНАЯ СТАТИСТИКА ЮЗЕРА ====================
+# ==================== ПРОФИЛЬ ====================
 @dp.callback_query(F.data == "profile")
 async def process_profile(call: CallbackQuery):
     user = get_user(call.from_user.id)
@@ -161,7 +165,7 @@ async def process_profile(call: CallbackQuery):
     )
     await call.answer()
 
-# ==================== СОЗДАНИЕ ЗАЯВОК ПОЛЬЗОВАТЕЛЕМ ====================
+# ==================== СОЗДАНИЕ ЗАЯВОК ====================
 @dp.callback_query(F.data == "max")
 async def process_max(call: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -253,7 +257,6 @@ async def process_withdraw_amount(message: Message, state: FSMContext):
         await message.answer(f"⚠️ Недостаточно средств. Ваш баланс: {balance} USDT.")
         return
         
-    # Списываем баланс до подтверждения выплаты админом
     update_user_balance(message.from_user.id, -amount)
     ticket_id = create_ticket(message.from_user.id, "WITHDRAW", data=f"Вывод {amount} USDT")
     await state.clear()
@@ -270,7 +273,7 @@ async def process_withdraw_amount(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-# ==================== ПАНЕЛЬ АДМИНИСТРАТОРА И ФУНКЦИИ ИЗМЕНЕНИЯ СТАТУСОВ ====================
+# ==================== АДМИН ФУНКЦИИ ====================
 @dp.callback_query(F.data.startswith("take:"))
 async def take_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
@@ -282,7 +285,6 @@ async def take_callback(call: CallbackQuery):
         await bot.send_message(t[1], f"🟡 Ваша заявка #{tid} взята в работу администратором. Ожидайте.")
         await call.answer("✅ Взято в работу")
 
-# Пункт 3: Запрос шестизначного кода у пользователя
 @dp.callback_query(F.data.startswith("ask_code:"))
 async def ask_code_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
@@ -297,7 +299,6 @@ async def ask_code_callback(call: CallbackQuery):
     user_id = t[1]
     
     try:
-        # Принудительно выставляем состояние FSM пользователю удаленно
         user_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
         await dp.fsm.storage.set_state(bot=bot, context=user_key, state=TicketStates.waiting_for_code)
         await dp.fsm.storage.set_data(bot=bot, context=user_key, data={"ask_code_ticket_id": tid})
@@ -312,7 +313,6 @@ async def ask_code_callback(call: CallbackQuery):
     except Exception as e:
         await call.answer(f"Не удалось отправить запрос: {e}", show_alert=True)
 
-# Хендлер приема шестизначного кода от пользователя
 @dp.message(TicketStates.waiting_for_code, F.text)
 async def user_code_input_handler(message: Message, state: FSMContext):
     code = message.text.strip()
@@ -326,11 +326,10 @@ async def user_code_input_handler(message: Message, state: FSMContext):
     
     if tid:
         t = get_ticket(tid)
-        current_info = t[4] if t[4] else ""
+        current_info = t[4] if t and t[4] else ""
         updated_info = f"{current_info} | Код подтверждения: {code}".strip(" | ")
         update_ticket_data(tid, updated_info)
         
-        # Пересылка кода администратору
         await bot.send_message(
             ADMIN_ID,
             f"📥 <b>Получен код подтверждения!</b>\n"
@@ -359,9 +358,9 @@ async def done_callback(call: CallbackQuery):
         
     payout = 0.0
     if t[2] == "MAX":
-        payout = MAX_PRICE  # 4.4 $
+        payout = MAX_PRICE
     elif t[2] == "CARD":
-        payout = CARD_PRICE # 100.0 $
+        payout = CARD_PRICE
         
     complete_ticket(tid, payout)
     
@@ -388,7 +387,7 @@ async def admin_reject_ticket_callback(call: CallbackQuery):
         try:
             amount_str = t[4].replace("Вывод ", "").replace(" USDT", "").strip()
             amount = float(amount_str)
-            update_user_balance(t[1], amount)  # Возвращаем баланс пользователю при отмене вывода
+            update_user_balance(t[1], amount)
         except Exception:
             pass
 
@@ -397,7 +396,6 @@ async def admin_reject_ticket_callback(call: CallbackQuery):
     await call.message.edit_text(f"❌ Заявка #{tid} успешно отклонена администратором.")
     await call.answer("❌ Заявка отклонена")
 
-# Пункт 2: Вечная таблица-статистика выплат и балансов для администратора по команде /payouts или /admin
 @dp.message(F.from_user.id == ADMIN_ID, Command("payouts", "admin"))
 async def admin_payouts_stats(message: Message):
     stats = get_all_users_stat()
