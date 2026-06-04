@@ -1,28 +1,25 @@
 import aiohttp
 import os
+from dotenv import load_dotenv
 
-CRYPTOBOT_TOKEN = os.getenv("532005:AA78QRhZPpW82lSyFOggX4PQD8uhkV8zxU1")
+load_dotenv()
 
-LIMITS = {
-    "free": 5,
-    "pro": 50,
-    "premium": 200
-}
+CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN")
 
-
-def check_limit(user):
-    if not user:
-        return False
-    tariff = user[1]
-    requests = user[2]
-    return requests < LIMITS.get(tariff, 5)
-
-
-async def create_invoice(amount):
+async def create_invoice(amount: float, description: str = ""):
+    if not CRYPTOBOT_TOKEN:
+        raise ValueError("CRYPTOBOT_TOKEN не найден в .env")
+    
     async with aiohttp.ClientSession() as session:
         async with session.post(
             "https://pay.crypt.bot/api/createInvoice",
             headers={"Crypto-Pay-API-Token": CRYPTOBOT_TOKEN},
-            json={"asset": "USDT", "amount": amount}
-        ) as r:
-            return await r.json()
+            json={
+                "asset": "USDT",
+                "amount": str(amount),
+                "description": description,
+                "paid_btn_name": "open_app",
+                "paid_btn_url": "https://t.me/yourbot"
+            }
+        ) as resp:
+            return await resp.json()

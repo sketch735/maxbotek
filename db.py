@@ -1,7 +1,6 @@
 import sqlite3
 from datetime import datetime
 
-# Подключение к базе данных
 DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
@@ -21,10 +20,10 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
     data TEXT,
     admin_id INTEGER,
     created_at TEXT,
-    completed_at TEXT
+    completed_at TEXT,
+    invoice_url TEXT
 )""")
 
-# Автоматическое добавление колонки total_earned, если таблица уже существовала
 try:
     cur.execute("ALTER TABLE users ADD COLUMN total_earned REAL DEFAULT 0")
 except sqlite3.OperationalError:
@@ -48,31 +47,27 @@ def update_user_balance(tg_id, amount):
         cur.execute("UPDATE users SET total_earned = total_earned + ? WHERE tg_id = ?", (amount, tg_id))
     DB.commit()
 
-def create_ticket(user_id, ttype, data=None):
-    cur.execute("""INSERT INTO tickets (user_id, type, data, created_at) 
-                   VALUES (?, ?, ?, ?)""", 
-                (user_id, ttype, data, datetime.utcnow().isoformat()))
+def create_ticket(user_id, ttype, data=None, invoice_url=None):
+    cur.execute("""INSERT INTO tickets (user_id, type, data, created_at, invoice_url) 
+                   VALUES (?, ?, ?, ?, ?)""", 
+                (user_id, ttype, data, datetime.utcnow().isoformat(), invoice_url))
     DB.commit()
     return cur.lastrowid
 
 def get_ticket(ticket_id):
-    cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE id=?", (ticket_id,))
+    cur.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,))
     return cur.fetchone()
 
-def get_new_tickets():
-    cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE status='new'")
-    return cur.fetchall()
-
-def get_user_tickets(user_id=None):
-    if user_id:
-        cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE user_id=?", (user_id,))
-    else:
-        cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets")
+def get_pending_withdrawals():
+    cur.execute("""
+        SELECT id, user_id, data, invoice_url 
+        FROM tickets 
+        WHERE type='WITHDRAW' AND status='new'
+    """)
     return cur.fetchall()
 
 def assign_ticket(ticket_id, admin_id):
-    cur.execute("UPDATE tickets SET admin_id=?, status='processing' WHERE id=?", 
-                (admin_id, ticket_id))
+    cur.execute("UPDATE tickets SET admin_id=?, status='processing' WHERE id=?", (admin_id, ticket_id))
     DB.commit()
 
 def update_ticket_data(ticket_id, data):

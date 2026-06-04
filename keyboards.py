@@ -26,14 +26,18 @@ def back_to_main():
     ])
 
 def admin_ticket_keyboard(ticket_id: int, ticket_type: str):
-    buttons = [
-        [InlineKeyboardButton(text="🟡 Взять в работу", callback_data=f"take:{ticket_id}")]
-    ]
+    buttons = [[InlineKeyboardButton(text="🟡 Взять в работу", callback_data=f"take:{ticket_id}")]]
     
-    # Для заявок типа MAX выводим кнопку запроса кода подтверждения
     if ticket_type == "MAX":
         buttons.append([InlineKeyboardButton(text="💬 Запросить код", callback_data=f"ask_code:{ticket_id}")])
-        
+    
     buttons.append([InlineKeyboardButton(text="✅ Подтвердить и начислить", callback_data=f"done:{ticket_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отменить заявку", callback_data=f"admin_cancel:{ticket_id}")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_withdraw_keyboard(ticket_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"paid:{ticket_id}")],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_cancel:{ticket_id}")]
+    ])
