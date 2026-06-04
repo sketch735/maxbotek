@@ -4,11 +4,12 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import CommandStart
+from aiogram import Bot, Dispatcher, F, BaseMiddleware
+from aiogram.types import Message, CallbackQuery, Update
+from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.base import StorageKey
 
 from db import (
     create_user,
@@ -22,14 +23,20 @@ from db import (
     complete_ticket,
     get_ticket,
     reject_ticket_db,
-    cur,
-    DB
+    get_all_users_stat
 )
 
-from keyboards import user_menu, admin_ticket_keyboard, profile_keyboard, back_to_main
+from keyboards import (
+    user_menu, 
+    admin_ticket_keyboard, 
+    profile_keyboard, 
+    back_to_main,
+    subscription_keyboard
+)
 
 logging.basicConfig(level=logging.INFO)
 
+# Загрузка конфигурации
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -45,237 +52,317 @@ ADMIN_ID = int(ADMIN_ID)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-MAX_PRICE = 50.0   
+# Фиксированные цены (Пункт 4: цена на MAX изменена на 4.4 $)
+MAX_PRICE = 4.4   
 CARD_PRICE = 100.0 
 
-class BotStates(StatesGroup):
+# Состояния FSM
+class TicketStates(StatesGroup):
     waiting_phone = State()
+    waiting_card = State()
     waiting_withdraw_amount = State()
+    waiting_for_code = State()  # Состояние ожидания шестизначного кода
 
-# ==================== USER FLOW ====================
+# ==================== MIDDLEWARE ПРОВЕРКИ ПОДПИСКИ ====================
+class SubscriptionMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event: Update, data: dict):
+        user = None
+        if event.message:
+            user = event.message.from_user
+        elif event.callback_query:
+            user = event.callback_query.from_user
+            
+        if user:
+            # Администратора никогда не блокируем
+            if user.id == ADMIN_ID:
+                return await handler(event, data)
+                
+            # Пропускаем сам callback проверки, чтобы избежать зацикливания
+            if event.callback_query and event.callback_query.data == "check_subscription":
+                return await handler(event, data)
+                
+            try:
+                # Проверка подписки на канал @adteoamdkmMAX (Бот должен быть админом в канале!)
+                member = await data['bot'].get_chat_member(chat_id="@adteoamdkmMAX", user_id=user.id)
+                if member.status in ["member", "administrator", "creator"]:
+                    return await handler(event, data)
+            except Exception as e:
+                logging.error(f"Ошибка при проверке подписки: {e}")
+            
+            # Если пользователь не подписан
+            text_msg = "⚠️ <b>Доступ заблокирован!</b>\nДля использования бота необходимо подписаться на наш Telegram-канал."
+            if event.message:
+                await event.message.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
+            elif event.callback_query:
+                await event.callback_query.message.answer(text_msg, reply_markup=subscription_keyboard(), parse_mode="HTML")
+                await event.callback_query.answer()
+            return
+        return await handler(event, data)
 
+# Регистрируем middleware
+dp.message.outer_middleware(SubscriptionMiddleware())
+dp.callback_query.outer_middleware(SubscriptionMiddleware())
+
+# ==================== ОБРАБОТКА ПОДПИСКИ ====================
+@dp.callback_query(F.data == "check_subscription")
+async def check_subscription_callback(call: CallbackQuery):
+    try:
+        member = await bot.get_chat_member(chat_id="@adteoamdkmMAX", user_id=call.from_user.id)
+        if member.status in ["member", "administrator", "creator"]:
+            await call.message.edit_text(
+                "✅ Подписка успешно подтверждена! Добро пожаловать в главное меню:",
+                reply_markup=user_menu()
+            )
+            await call.answer("Спасибо за подписку!")
+        else:
+            await call.answer("❌ Вы всё еще не подписались на канал!", show_alert=True)
+    except Exception:
+        await call.answer("⚠️ Ошибка проверки. Убедитесь, что бот добавлен администратором в канал.", show_alert=True)
+
+# ==================== СТАРТ И ОСНОВНОЕ МЕНЮ ====================
 @dp.message(CommandStart())
-async def start(message: Message, state: FSMContext):
-    await state.clear()
+async def start_cmd(message: Message):
     create_user(message.from_user.id)
     await message.answer(
-        "🚀 <b>MaxRentik</b>\n\nВыберите действие в меню ниже:",
+        "🚀 <b>MaxRentik CRM</b> активирован\n\nВыберите действие в меню ниже:",
         reply_markup=user_menu(),
         parse_mode="HTML"
     )
 
 @dp.callback_query(F.data == "main")
-async def back_to_main_handler(call: CallbackQuery, state: FSMContext):
+async def process_main_menu(call: CallbackQuery, state: FSMContext):
     await state.clear()
     await call.message.edit_text(
-        "🚀 <b>MaxRentik CRM активирован</b>\n\nВыберите действие в меню ниже:",
+        "🚀 <b>MaxRentik CRM</b> активирован\n\nВыберите действие в меню ниже:",
         reply_markup=user_menu(),
         parse_mode="HTML"
     )
     await call.answer()
 
-# ---- 1.1 СДАТЬ MAX (НОМЕР РФ) ----
-@dp.callback_query(F.data == "max")
-async def hand_over_max(call: CallbackQuery, state: FSMContext):
-    await state.set_state(BotStates.waiting_phone)
-    await call.message.edit_text(
-        "📦 <b>Сдача MAX (Номера РФ)</b>\n\nВведите ваш номер телефона (каждый с новой строки, если их несколько):",
-        reply_markup=back_to_main(),
-        parse_mode="HTML"
-    )
-    await call.answer()
-
-@dp.message(BotStates.waiting_phone)
-async def process_phone(message: Message, state: FSMContext):
-    phones = message.text.strip()
-    ticket_id = create_ticket(message.from_user.id, "MAX", data=phones)
-    await state.clear()
-    
-    await message.answer(
-        f"✅ <b>Заявка #{ticket_id} на номер(а) успешно отправлена!</b>\n"
-        f"Администратор проверяет её. Пожалуйста, ожидайте уведомлений.",
-        reply_markup=back_to_main(),
-        parse_mode="HTML"
-    )
-    
-    await bot.send_message(
-        ADMIN_ID,
-        f"🆕 <b>Новая заявка #{ticket_id} [MAX]</b>\n"
-        f"Пользователь: {message.from_user.id} (@{message.from_user.username})\n"
-        f"Номера:\n<code>{phones}</code>",
-        reply_markup=admin_ticket_keyboard(ticket_id, "MAX"),
-        parse_mode="HTML"
-    )
-
-# ---- 1.2 СДАТЬ КАРТУ ----
-@dp.callback_query(F.data == "card")
-async def hand_over_card(call: CallbackQuery):
-    ticket_id = create_ticket(call.from_user.id, "CARD", data="Сделка в ЛС")
-    
-    try:
-        admin_chat = await bot.get_chat(ADMIN_ID)
-        admin_username = admin_chat.username if admin_chat.username else "admin"
-    except Exception:
-        admin_username = "admin"
-
-    await call.message.edit_text(
-        f"💳 <b>Сдача карты происходит через администратора!</b>\n\n"
-        f"Для проведения сделки напишите напрямую в личные сообщения:\n"
-        f"👉 @{admin_username}\n\n"
-        f"<i>Сообщите админу, что вы создали заявку #{ticket_id}. "
-        f"После успешной сдачи карты админ подтвердит её в боте, и деньги поступят на баланс.</i>",
-        reply_markup=back_to_main(),
-        parse_mode="HTML"
-    )
-    
-    await bot.send_message(
-        ADMIN_ID,
-        f"💳 <b>Пользователь хочет сдать карту! Заявка #{ticket_id}</b>\n"
-        f"Пользователь: {call.from_user.id} (@{call.from_user.username})\n"
-        f"Ожидайте сообщения в ЛС.",
-        reply_markup=admin_ticket_keyboard(ticket_id, "CARD"),
-        parse_mode="HTML"
-    )
-    await call.answer()
-
-# ---- ЛОГИКА ПРОФИЛЯ И СТАТИСТИКИ ----
+# ==================== ПРОФИЛЬ И ВЕЧНАЯ СТАТИСТИКА ЮЗЕРА ====================
 @dp.callback_query(F.data == "profile")
-async def show_profile(call: CallbackQuery):
+async def process_profile(call: CallbackQuery):
     user = get_user(call.from_user.id)
-    tickets = get_user_tickets(call.from_user.id)
-    
-    balance = user[2] if user else 0.0
-    
-    waiting_count = len([t for t in tickets if t[3] == 'new'])
-    processing_count = len([t for t in tickets if t[3] == 'processing'])
-    done_count = len([t for t in tickets if t[3] == 'done'])
-    error_count = len([t for t in tickets if t[3] == 'rejected'])
+    if not user:
+        create_user(call.from_user.id)
+        user = get_user(call.from_user.id)
+        
+    balance = user[2]
+    total_earned = user[3]
     
     await call.message.edit_text(
-        f"👤 <b>Ваш профиль и статистика:</b>\n\n"
-        f"💰 <b>Текущий баланс:</b> {balance} USDT\n\n"
-        f"⏳ В ожидании: {waiting_count}\n"
-        f"🛠 В работе: {processing_count}\n"
-        f"✅ Засчитано: {done_count}\n"
-        f"❌ Ошибки: {error_count}\n",
+        f"👤 <b>Ваш профиль & Статистика</b>\n\n"
+        f"🆔 Ваш Telegram ID: <code>{call.from_user.id}</code>\n"
+        f"💰 Доступно к выводу: <b>{balance} USDT</b>\n"
+        f"📈 Заработано за всё время: <b>{total_earned} USDT</b>\n\n"
+        f"<i>Статистика обновляется автоматически и хранится вечно.</i>",
         reply_markup=profile_keyboard(),
         parse_mode="HTML"
     )
     await call.answer()
 
-# ---- 1.3 ВЫВОД СРЕДСТВ ----
-@dp.callback_query(F.data == "withdraw")
-async def withdraw_start(call: CallbackQuery, state: FSMContext):
-    user = get_user(call.from_user.id)
-    balance = user[2] if user else 0.0
-    
-    if balance < 3.0:
-        await call.answer("❌ Минимальная сумма для вывода составляет $3!", show_alert=True)
-        return
-        
-    await state.set_state(BotStates.waiting_withdraw_amount)
+# ==================== СОЗДАНИЕ ЗАЯВОК ПОЛЬЗОВАТЕЛЕМ ====================
+@dp.callback_query(F.data == "max")
+async def process_max(call: CallbackQuery, state: FSMContext):
+    await state.clear()
     await call.message.edit_text(
-        f"💰 <b>Вывод средств через Crypto Bot</b>\n\n"
-        f"Ваш текущий баланс: {balance} USDT\n"
-        f"Минимальная сумма: $3\n\n"
-        f"Введите сумму вывода:",
-        reply_markup=back_to_main(),
-        parse_mode="HTML"
+        "📦 Вы выбрали сдачу MAX.\nПожалуйста, введите ваш номер телефона/счета MAX:",
+        reply_markup=back_to_main()
     )
-    await call.answer()
+    await state.set_state(TicketStates.waiting_phone)
 
-@dp.message(BotStates.waiting_withdraw_amount)
-async def process_withdraw_amount(message: Message, state: FSMContext):
-    user = get_user(message.from_user.id)
-    balance = user[2] if user else 0.0
-    
-    try:
-        amount = float(message.text.replace(",", ".").strip())
-    except ValueError:
-        await message.answer("❌ Пожалуйста, введите корректное число (например, 5 или 10.50).")
-        return
+@dp.callback_query(F.data == "card")
+async def process_card(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await call.message.edit_text(
+        "💳 Вы выбрали сдачу карты.\nПожалуйста, введите реквизиты вашей карты:",
+        reply_markup=back_to_main()
+    )
+    await state.set_state(TicketStates.waiting_card)
 
-    if amount < 3.0:
-        await message.answer("❌ Минимальная сумма вывода составляет $3.")
-        return
-
-    if amount > balance:
-        await message.answer(
-            f"❌ <b>Ошибка безопасности!</b>\n"
-            f"Запрошенная сумма ({amount} USDT) превышает ваш текущий баланс ({balance} USDT).\n"
-            f"Пожалуйста, введите корректную сумму.",
-            reply_markup=back_to_main(),
-            parse_mode="HTML"
-        )
-        return
-
-    update_user_balance(message.from_user.id, -amount)
+@dp.message(TicketStates.waiting_phone, F.text)
+async def process_phone_input(message: Message, state: FSMContext):
+    phone = message.text.strip()
+    ticket_id = create_ticket(message.from_user.id, "MAX", data=f"Телефон/Счет: {phone}")
     await state.clear()
     
-    ticket_id = create_ticket(message.from_user.id, "WITHDRAW", data=f"Вывод {amount} USDT")
-    
     await message.answer(
-        f"✅ <b>Заявка на вывод #{ticket_id} на сумму {amount} USDT успешно создана!</b>\n\n"
-        f"Переводы выполняются в автоматическом режиме с 20:00 до 23:00 (МСК).\n"
-        f"⚠️ <i>Убедитесь, что ваш Crypto Bot активен и не заблокирован.</i>",
-        reply_markup=back_to_main(),
-        parse_mode="HTML"
+        f"✅ Заявка #{ticket_id} на сдачу MAX успешно создана!\nОжидайте проверки администратором.",
+        reply_markup=user_menu()
     )
     
     await bot.send_message(
         ADMIN_ID,
-        f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
-        f"Пользователь: {message.from_user.id} (@{message.from_user.username})\n"
-        f"Сумма к выплате: <code>{amount}</code> USDT",
+        f"🆕 <b>Новая заявка #{ticket_id} (MAX)</b>\nПользователь: <code>{message.from_user.id}</code>\nДанные: {phone}",
+        reply_markup=admin_ticket_keyboard(ticket_id, "MAX"),
+        parse_mode="HTML"
+    )
+
+@dp.message(TicketStates.waiting_card, F.text)
+async def process_card_input(message: Message, state: FSMContext):
+    card_details = message.text.strip()
+    ticket_id = create_ticket(message.from_user.id, "CARD", data=f"Реквизиты: {card_details}")
+    await state.clear()
+    
+    await message.answer(
+        f"✅ Заявка #{ticket_id} на сдачу карты успешно создана!\nОжидайте проверки администратором.",
+        reply_markup=user_menu()
+    )
+    
+    await bot.send_message(
+        ADMIN_ID,
+        f"🆕 <b>Новая заявка #{ticket_id} (CARD)</b>\nПользователь: <code>{message.from_user.id}</code>\nДанные: {card_details}",
+        reply_markup=admin_ticket_keyboard(ticket_id, "CARD"),
+        parse_mode="HTML"
+    )
+
+# ==================== ВЫВОД СРЕДСТВ ====================
+@dp.callback_query(F.data == "withdraw")
+async def process_withdraw(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = get_user(call.from_user.id)
+    balance = user[2] if user else 0.0
+    
+    if balance <= 0:
+        await call.answer("❌ У вас нет доступных средств для вывода!", show_alert=True)
+        return
+        
+    await call.message.edit_text(
+        f"💰 Ваш текущий баланс: {balance} USDT.\n"
+        f"Введите сумму, которую вы хотите вывести:",
+        reply_markup=back_to_main()
+    )
+    await state.set_state(TicketStates.waiting_withdraw_amount)
+
+@dp.message(TicketStates.waiting_withdraw_amount, F.text)
+async def process_withdraw_amount(message: Message, state: FSMContext):
+    try:
+        amount = float(message.text.strip())
+    except ValueError:
+        await message.answer("⚠️ Пожалуйста, введите корректное число.")
+        return
+        
+    user = get_user(message.from_user.id)
+    balance = user[2] if user else 0.0
+    
+    if amount <= 0:
+        await message.answer("⚠️ Сумма должна быть больше нуля.")
+        return
+        
+    if amount > balance:
+        await message.answer(f"⚠️ Недостаточно средств. Ваш баланс: {balance} USDT.")
+        return
+        
+    # Списываем баланс до подтверждения выплаты админом
+    update_user_balance(message.from_user.id, -amount)
+    ticket_id = create_ticket(message.from_user.id, "WITHDRAW", data=f"Вывод {amount} USDT")
+    await state.clear()
+    
+    await message.answer(
+        f"✅ Заявка на вывод #{ticket_id} на сумму {amount} USDT успешно создана!\nОжидайте проведения выплаты.",
+        reply_markup=user_menu()
+    )
+    
+    await bot.send_message(
+        ADMIN_ID,
+        f"💰 <b>Заявка на вывод #{ticket_id}</b>\nПользователь: <code>{message.from_user.id}</code>\nСумма: {amount} USDT",
         reply_markup=admin_ticket_keyboard(ticket_id, "WITHDRAW"),
         parse_mode="HTML"
     )
 
-# ==================== ADMIN ACTIONS ====================
-
+# ==================== ПАНЕЛЬ АДМИНИСТРАТОРА И ФУНКЦИИ ИЗМЕНЕНИЯ СТАТУСОВ ====================
 @dp.callback_query(F.data.startswith("take:"))
-async def admin_take_ticket(call: CallbackQuery):
+async def take_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     tid = int(call.data.split(":")[1])
-    assign_ticket(tid, ADMIN_ID)
+    assign_ticket(tid, call.from_user.id)
     t = get_ticket(tid)
-    
-    await bot.send_message(t[1], f"🟡 Ваша заявка #{tid} ({t[2]}) взята администратором в работу.")
-    await call.message.edit_text(f"🛠 Заявка #{tid} переведена в статус 'В работе'.")
-    await call.answer("Взято в работу")
+    if t:
+        await bot.send_message(t[1], f"🟡 Ваша заявка #{tid} взята в работу администратором. Ожидайте.")
+        await call.answer("✅ Взято в работу")
 
+# Пункт 3: Запрос шестизначного кода у пользователя
 @dp.callback_query(F.data.startswith("ask_code:"))
-async def admin_ask_code(call: CallbackQuery):
+async def ask_code_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     
-    await bot.send_message(
-        t[1], 
-        f"⚠️ <b>Внимание!</b> Администратор проверяет заявку #{tid}.\n"
-        f"Пожалуйста, <b>посмотрите код подтверждения</b> на вашем телефоне и будьте готовы передать его админу в случае необходимости!"
-    )
-    await call.answer("🔔 Уведомление о коде отправлено пользователю!")
+    if not t:
+        await call.answer("Заявка не найдена.", show_alert=True)
+        return
+        
+    user_id = t[1]
+    
+    try:
+        # Принудительно выставляем состояние FSM пользователю удаленно
+        user_key = StorageKey(bot_id=bot.id, chat_id=user_id, user_id=user_id)
+        await dp.fsm.storage.set_state(bot=bot, context=user_key, state=TicketStates.waiting_for_code)
+        await dp.fsm.storage.set_data(bot=bot, context=user_key, data={"ask_code_ticket_id": tid})
+        
+        await bot.send_message(
+            user_id,
+            f"💬 <b>Внимание!</b> Администратор запросил шестизначный код подтверждения для вашей заявки #{tid}.\n"
+            f"Пожалуйста, отправьте шестизначный код ответным сообщением сюда.",
+            parse_mode="HTML"
+        )
+        await call.answer("Запрос кода успешно отправлен пользователю!", show_alert=True)
+    except Exception as e:
+        await call.answer(f"Не удалось отправить запрос: {e}", show_alert=True)
+
+# Хендлер приема шестизначного кода от пользователя
+@dp.message(TicketStates.waiting_for_code, F.text)
+async def user_code_input_handler(message: Message, state: FSMContext):
+    code = message.text.strip()
+    
+    if not (code.isdigit() and len(code) == 6):
+        await message.answer("⚠️ Пожалуйста, введите корректный шестизначный цифровой код.")
+        return
+        
+    state_data = await state.get_data()
+    tid = state_data.get("ask_code_ticket_id")
+    
+    if tid:
+        t = get_ticket(tid)
+        current_info = t[4] if t[4] else ""
+        updated_info = f"{current_info} | Код подтверждения: {code}".strip(" | ")
+        update_ticket_data(tid, updated_info)
+        
+        # Пересылка кода администратору
+        await bot.send_message(
+            ADMIN_ID,
+            f"📥 <b>Получен код подтверждения!</b>\n"
+            f"Заявка: #{tid} ({t[2]})\n"
+            f"Пользователь: <code>{message.from_user.id}</code>\n"
+            f"Код: <code>{code}</code>",
+            parse_mode="HTML"
+        )
+        
+        await message.answer("✅ Код успешно отправлен администратору. Ожидайте подтверждения заявки.")
+        await state.clear()
+    else:
+        await message.answer("❌ Заявка устарела или не найдена.")
+        await state.clear()
 
 @dp.callback_query(F.data.startswith("done:"))
-async def admin_done_ticket(call: CallbackQuery):
+async def done_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     
-    if t[3] == 'done':
-        await call.answer("Эта заявка уже выполнена!", show_alert=True)
+    if not t or t[3] in ['done', 'rejected']:
+        await call.answer("Заявка уже обработана или не найдена.", show_alert=True)
         return
-
+        
     payout = 0.0
     if t[2] == "MAX":
-        payout = MAX_PRICE
+        payout = MAX_PRICE  # 4.4 $
     elif t[2] == "CARD":
-        payout = CARD_PRICE
-    
+        payout = CARD_PRICE # 100.0 $
+        
     complete_ticket(tid, payout)
     
     if t[2] == "WITHDRAW":
@@ -287,28 +374,53 @@ async def admin_done_ticket(call: CallbackQuery):
     await call.answer("Выполнено!")
 
 @dp.callback_query(F.data.startswith("admin_cancel:"))
-async def admin_reject_ticket(call: CallbackQuery):
+async def admin_reject_ticket_callback(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID:
         return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     
-    if t[3] == 'done':
-        await call.answer("Нельзя отменить уже выполненную заявку!", show_alert=True)
+    if not t or t[3] in ['done', 'rejected']:
+        await call.answer("Нельзя изменить статус этой заявки!", show_alert=True)
         return
         
     if t[2] == "WITHDRAW":
         try:
             amount_str = t[4].replace("Вывод ", "").replace(" USDT", "").strip()
             amount = float(amount_str)
-            update_user_balance(t[1], amount)
+            update_user_balance(t[1], amount)  # Возвращаем баланс пользователю при отмене вывода
         except Exception:
             pass
 
     reject_ticket_db(tid)
     await bot.send_message(t[1], f"❌ Ваша заявка #{tid} ({t[2]}) была отклонена администратором.")
-    await call.message.edit_text(f"❌ Заявка #{tid} успешно отклонена.")
-    await call.answer("Отклонено")
+    await call.message.edit_text(f"❌ Заявка #{tid} успешно отклонена администратором.")
+    await call.answer("❌ Заявка отклонена")
+
+# Пункт 2: Вечная таблица-статистика выплат и балансов для администратора по команде /payouts или /admin
+@dp.message(F.from_user.id == ADMIN_ID, Command("payouts", "admin"))
+async def admin_payouts_stats(message: Message):
+    stats = get_all_users_stat()
+    if not stats:
+        await message.answer("📭 База данных пользователей пуста.")
+        return
+        
+    report = "📊 <b>Вечная статистика выплат и балансов:</b>\n\n"
+    report += f"Всего пользователей в системе: {len(stats)}\n"
+    report += "-----------------------------------------\n"
+    
+    for row in stats:
+        tg_id, balance, total_earned = row
+        report += f"👤 Юзер ID: <code>{tg_id}</code>\n"
+        report += f"💰 Доступно к выплате (Баланс): <b>{balance} USDT</b>\n"
+        report += f"📈 Заработано за всё время: <b>{total_earned} USDT</b>\n"
+        report += "-----------------------------------------\n"
+        
+    if len(report) > 4096:
+        for x in range(0, len(report), 4096):
+            await message.answer(report[x:x+4096], parse_mode="HTML")
+    else:
+        await message.answer(report, parse_mode="HTML")
 
 # ==================== ЗАПУСК БОТА ====================
 async def main():

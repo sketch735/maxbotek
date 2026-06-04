@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 
+# Подключение к базе данных
 DB = sqlite3.connect("bot_v2.db", check_same_thread=False)
 cur = DB.cursor()
 
@@ -8,7 +9,8 @@ cur = DB.cursor()
 cur.execute("""CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
     created_at TEXT,
-    balance REAL DEFAULT 0
+    balance REAL DEFAULT 0,
+    total_earned REAL DEFAULT 0
 )""")
 
 cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
@@ -22,20 +24,28 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
     completed_at TEXT
 )""")
 
+# Автоматическое добавление колонки total_earned, если таблица уже существовала
+try:
+    cur.execute("ALTER TABLE users ADD COLUMN total_earned REAL DEFAULT 0")
+except sqlite3.OperationalError:
+    pass
+
 DB.commit()
 
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id):
-    cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at) VALUES (?, ?)", 
+    cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at, balance, total_earned) VALUES (?, ?, 0, 0)", 
                 (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
 
 def get_user(tg_id):
-    cur.execute("SELECT * FROM users WHERE tg_id=?", (tg_id,))
+    cur.execute("SELECT tg_id, created_at, balance, total_earned FROM users WHERE tg_id=?", (tg_id,))
     return cur.fetchone()
 
 def update_user_balance(tg_id, amount):
     cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, tg_id))
+    if amount > 0:
+        cur.execute("UPDATE users SET total_earned = total_earned + ? WHERE tg_id = ?", (amount, tg_id))
     DB.commit()
 
 def create_ticket(user_id, ttype, data=None):
@@ -46,18 +56,18 @@ def create_ticket(user_id, ttype, data=None):
     return cur.lastrowid
 
 def get_ticket(ticket_id):
-    cur.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,))
+    cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE id=?", (ticket_id,))
     return cur.fetchone()
 
 def get_new_tickets():
-    cur.execute("SELECT * FROM tickets WHERE status='new'")
+    cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE status='new'")
     return cur.fetchall()
 
 def get_user_tickets(user_id=None):
     if user_id:
-        cur.execute("SELECT * FROM tickets WHERE user_id=?", (user_id,))
+        cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets WHERE user_id=?", (user_id,))
     else:
-        cur.execute("SELECT * FROM tickets")
+        cur.execute("SELECT id, user_id, type, status, data, admin_id, created_at, completed_at FROM tickets")
     return cur.fetchall()
 
 def assign_ticket(ticket_id, admin_id):
@@ -81,6 +91,9 @@ def complete_ticket(ticket_id, amount=0):
         cur.execute("SELECT user_id FROM tickets WHERE id=?", (ticket_id,))
         result = cur.fetchone()
         if result:
-            user_id = result[0]
-            cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, user_id))
+            update_user_balance(result[0], amount)
     DB.commit()
+
+def get_all_users_stat():
+    cur.execute("SELECT tg_id, balance, total_earned FROM users")
+    return cur.fetchall()
