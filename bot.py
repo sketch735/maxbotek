@@ -5,15 +5,14 @@ from datetime import datetime
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 from db import (
     create_user, get_user, update_user_balance, create_ticket,
-    get_ticket, assign_ticket, update_ticket_data, complete_ticket,
-    reject_ticket_db, get_pending_withdrawals,
+    get_ticket, reject_ticket_db, get_pending_withdrawals,
     increment_max_submitted, increment_cards_submitted,
     set_subscribed, is_subscribed
 )
@@ -53,11 +52,9 @@ class SubscriptionMiddleware(BaseMiddleware):
         if isinstance(event, CallbackQuery) and event.data == "check_subscription":
             return await handler(event, data)
 
-        # Если уже подписан в базе — сразу пропускаем
         if is_subscribed(user.id):
             return await handler(event, data)
 
-        # Проверяем подписку
         try:
             member = await data['bot'].get_chat_member("@adteoamdkmMAX", user.id)
             if member.status in ["member", "administrator", "creator"]:
@@ -143,7 +140,9 @@ async def phone_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
-        f"🆕 Новая заявка #{ticket_id} (MAX)\nПользователь: <code>{message.from_user.id}</code>",
+        f"🆕 Новая заявка #{ticket_id} (MAX)\n"
+        f"Пользователь: <code>{message.from_user.id}</code>\n"
+        f"Данные: {message.text}",
         reply_markup=admin_ticket_keyboard(ticket_id, "MAX"), 
         parse_mode="HTML"
     )
@@ -177,7 +176,9 @@ async def card_details_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
-        f"🆕 Новая заявка #{ticket_id} (CARD - {card_type})",
+        f"🆕 Новая заявка #{ticket_id} (CARD - {card_type})\n"
+        f"Пользователь: <code>{message.from_user.id}</code>\n"
+        f"Данные:\n{full_data}",
         reply_markup=admin_ticket_keyboard(ticket_id, "CARD"), 
         parse_mode="HTML"
     )
@@ -205,23 +206,27 @@ async def withdraw_amount(message: Message, state: FSMContext):
     if amount > user[2]:
         return await message.answer("❌ Сумма превышает баланс.")
 
-    invoice = await create_invoice(amount, f"Вывод #{message.from_user.id}")
-    if invoice.get("ok"):
-        invoice_url = invoice["result"]["pay_url"]
-        ticket_id = create_ticket(message.from_user.id, "WITHDRAW", f"Вывод {amount} USDT", invoice_url)
-        
-        await message.answer(f"✅ Заявка на вывод #{ticket_id} создана!\nОжидайте оплаты.", reply_markup=user_menu())
-        
-        await bot.send_message(
-            ADMIN_ID,
-            f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
-            f"Пользователь: <code>{message.from_user.id}</code>\n"
-            f"Сумма: {amount} USDT\n"
-            f"Чек: {invoice_url}",
-            reply_markup=admin_withdraw_keyboard(ticket_id),
-            parse_mode="HTML"
-        )
-    else:
+    try:
+        invoice = await create_invoice(amount, f"Вывод #{message.from_user.id}")
+        if invoice.get("ok"):
+            invoice_url = invoice["result"]["pay_url"]
+            ticket_id = create_ticket(message.from_user.id, "WITHDRAW", f"Вывод {amount} USDT", invoice_url)
+            
+            await message.answer(f"✅ Заявка на вывод #{ticket_id} создана!\nОжидайте оплаты.", reply_markup=user_menu())
+            
+            await bot.send_message(
+                ADMIN_ID,
+                f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
+                f"Пользователь: <code>{message.from_user.id}</code>\n"
+                f"Сумма: {amount} USDT\n"
+                f"Чек: {invoice_url}",
+                reply_markup=admin_withdraw_keyboard(ticket_id),
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer("❌ Ошибка создания чека. Проверьте токен CryptoBot.")
+    except Exception as e:
+        logging.error(f"Invoice error: {e}")
         await message.answer("❌ Ошибка создания чека.")
     await state.clear()
 
@@ -244,16 +249,10 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
     t = get_ticket(tid)
     if not t: return await call.answer("Заявка не найдена")
 
-    if t[2] == "CARD":
-        await call.message.edit_text("💰 Введите сумму для начисления пользователю:")
-        await state.set_state(TicketStates.waiting_card_price)
-        await state.update_data(ticket_id=tid)
-        return
-
-    amount = 4.4 if t[2] == "MAX" else 0
-    complete_ticket(tid, amount)
-    await call.message.edit_text(f"✅ Заявка #{tid} завершена.")
-    await call.answer("Готово!")
+    await call.message.edit_text(f"💰 Введите сумму для начисления пользователю по заявке #{tid}:")
+    await state.set_state(TicketStates.waiting_card_price)
+    await state.update_data(ticket_id=tid)
+    await call.answer("Введите сумму")
 
 @dp.message(TicketStates.waiting_card_price)
 async def card_price_input(message: Message, state: FSMContext):
@@ -262,18 +261,11 @@ async def card_price_input(message: Message, state: FSMContext):
         data = await state.get_data()
         tid = data.get("ticket_id")
         complete_ticket(tid, amount)
-        await message.answer(f"✅ Карта #{tid} оплачена на {amount} USDT.")
+        await message.answer(f"✅ Заявка #{tid} оплачена на {amount} USDT.")
+        await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
     except:
         await message.answer("❌ Неверная сумма.")
     await state.clear()
-
-@dp.callback_query(F.data.startswith("take:"))
-async def take_ticket(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    tid = int(call.data.split(":")[1])
-    assign_ticket(tid, ADMIN_ID)
-    await call.message.edit_text(f"🟡 Заявка #{tid} взята в работу.")
-    await call.answer("Взято в работу!")
 
 @dp.callback_query(F.data.startswith("admin_cancel:"))
 async def admin_cancel(call: CallbackQuery):
@@ -324,7 +316,7 @@ async def tab_command(message: Message):
     text = "📋 <b>Заявки на выплату:</b>\n\n"
     for w in withdrawals:
         tid, uid, data, url = w
-        text += f"#{tid} | User: <code>{uid}</code> | {data}\n\n"
+        text += f"#{tid} | User: <code>{uid}</code> | {data}\nЧек: {url or 'нет'}\n\n"
         kb.append([InlineKeyboardButton(text=f"💰 Выплатить #{tid}", callback_data=f"pay_withdraw:{tid}")])
     
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
@@ -332,9 +324,7 @@ async def tab_command(message: Message):
 @dp.callback_query(F.data.startswith("pay_withdraw:"))
 async def pay_withdraw_inline(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
-    tid = int(call.data.split(":")[1])
-    # Здесь можно добавить создание нового чека, если нужно
-    await call.answer("Функция в разработке")
+    await call.answer("Функция в разработке (используй paid кнопку)")
 
 @dp.message(F.from_user.id == ADMIN_ID, Command("admin"))
 async def toggle_admin(message: Message):
