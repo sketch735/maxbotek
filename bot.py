@@ -198,7 +198,7 @@ async def withdraw_start(call: CallbackQuery, state: FSMContext):
 @dp.message(TicketStates.waiting_withdraw_amount)
 async def withdraw_amount(message: Message, state: FSMContext):
     try:
-        amount = float(message.text.strip())
+        amount = float(message.text.strip().replace(',', '.'))
     except:
         return await message.answer("❌ Введите корректную сумму.")
 
@@ -252,19 +252,22 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(f"💰 Введите сумму для начисления пользователю по заявке #{tid}:")
     await state.set_state(TicketStates.waiting_card_price)
     await state.update_data(ticket_id=tid)
-    await call.answer("Введите сумму")
+    await call.answer("Введите сумму (например 4 или 5.5)")
 
 @dp.message(TicketStates.waiting_card_price)
 async def card_price_input(message: Message, state: FSMContext):
     try:
-        amount = float(message.text.strip())
+        text = message.text.strip().replace(',', '.').replace(' ', '')
+        amount = float(text)
+        if amount <= 0:
+            raise ValueError("Negative amount")
         data = await state.get_data()
         tid = data.get("ticket_id")
         complete_ticket(tid, amount)
         await message.answer(f"✅ Заявка #{tid} оплачена на {amount} USDT.")
         await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
     except:
-        await message.answer("❌ Неверная сумма.")
+        await message.answer("❌ Неверная сумма. Введите число, например: 4 или 5.5")
     await state.clear()
 
 @dp.callback_query(F.data.startswith("admin_cancel:"))
