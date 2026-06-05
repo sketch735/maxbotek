@@ -133,7 +133,7 @@ async def profile(call: CallbackQuery):
 # ==================== Сдача MAX ====================
 @dp.callback_query(F.data == "max")
 async def process_max(call: CallbackQuery, state: FSMContext):
-    await call.message.edit_text("📦 Введите номер телефона / счёт MAX:", reply_markup=back_to_main())
+    await call.message.edit_text("📦 Введите номер телефона РФ:", reply_markup=back_to_main())
     await state.set_state(TicketStates.waiting_phone)
 
 @dp.message(TicketStates.waiting_phone)
