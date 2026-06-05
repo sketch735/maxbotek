@@ -26,7 +26,8 @@ def back_to_main():
     ])
 
 def admin_ticket_keyboard(ticket_id: int, ticket_type: str):
-    buttons = [[InlineKeyboardButton(text="🟡 Взять в работу", callback_data=f"take:{ticket_id}")]]
+    # Убрали кнопку "Взять в работу"
+    buttons = []
     
     if ticket_type == "MAX":
         buttons.append([InlineKeyboardButton(text="💬 Запросить код", callback_data=f"ask_code:{ticket_id}")])
