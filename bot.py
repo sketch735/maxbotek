@@ -134,49 +134,20 @@ async def process_max(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("📦 Введите номер телефона РФ:", reply_markup=back_to_main())
     await state.set_state(TicketStates.waiting_phone)
 
-@dp.message(TicketStates.waiting_card_price)
-async def card_price_input(message: Message, state: FSMContext):
-    try:
-        # Улучшенная очистка: берём только числа и точку/запятую
-        text = message.text.strip()
-        # Убираем всё кроме цифр, точки и запятой
-        cleaned = ''.join(c for c in text if c.isdigit() or c in '.,')
-        if not cleaned:
-            raise ValueError
-
-        # Заменяем запятую на точку и берём первое число
-        cleaned = cleaned.replace(',', '.')
-        # Берём первое валидное число
-        import re
-        match = re.search(r'\d+\.?\d*', cleaned)
-        if not match:
-            raise ValueError
-
-        amount = float(match.group())
-        
-        if amount <= 0:
-            raise ValueError
-
-        data = await state.get_data()
-        tid = data.get("ticket_id")
-        
-        complete_ticket(tid, amount)
-        
-        await message.answer(f"✅ Заявка #{tid} успешно оплачена на {amount} USDT!")
-        await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
-        await state.clear()
-        
-    except Exception as e:
-        logging.error(f"Price input error: {e}")
-        await message.answer(
-            "❌ Неверная сумма!\n\n"
-            "Введите просто число, например:\n"
-            "<b>4</b>\n"
-            "<b>5.5</b>\n"
-            "<b>10</b>",
-            parse_mode="HTML"
-        )
-        # НЕ очищаем состояние — бот будет ждать дальше    await state.clear()
+@dp.message(TicketStates.waiting_phone)
+async def phone_input(message: Message, state: FSMContext):
+    ticket_id = create_ticket(message.from_user.id, "MAX", f"Телефон: {message.text}")
+    increment_max_submitted(message.from_user.id)
+    await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
+    await bot.send_message(
+        ADMIN_ID, 
+        f"🆕 Новая заявка #{ticket_id} (MAX)\n"
+        f"Пользователь: <code>{message.from_user.id}</code>\n"
+        f"Данные: {message.text}",
+        reply_markup=admin_ticket_keyboard(ticket_id, "MAX"), 
+        parse_mode="HTML"
+    )
+    await state.clear()
 
 # ==================== Сдача КАРТЫ ====================
 @dp.callback_query(F.data == "card")
@@ -254,13 +225,13 @@ async def withdraw_amount(message: Message, state: FSMContext):
                 parse_mode="HTML"
             )
         else:
-            await message.answer("❌ Ошибка создания чека. Проверьте токен CryptoBot.")
+            await message.answer("❌ Ошибка создания чека.")
     except Exception as e:
         logging.error(f"Invoice error: {e}")
         await message.answer("❌ Ошибка создания чека.")
     await state.clear()
 
-# ==================== Админ: Начисление суммы ====================
+# ==================== Админ: Начисление суммы (ФИКС) ====================
 @dp.callback_query(F.data.startswith("done:"))
 async def done_callback(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
@@ -270,7 +241,7 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
 
     await call.message.edit_text(
         f"💰 Введите сумму для начисления по заявке #{tid}\n"
-        f"(например: 4 или 5.5):"
+        f"(просто число, например 4 или 5.5):"
     )
     await state.set_state(TicketStates.waiting_card_price)
     await state.update_data(ticket_id=tid)
@@ -278,24 +249,40 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
 @dp.message(TicketStates.waiting_card_price)
 async def card_price_input(message: Message, state: FSMContext):
     try:
-        text = message.text.strip().replace(',', '.').replace(' ', '')
-        amount = float(text)
+        text = message.text.strip()
+        cleaned = ''.join(c for c in text if c.isdigit() or c in '.,')
+        if not cleaned:
+            raise ValueError
+
+        cleaned = cleaned.replace(',', '.')
+        match = re.search(r'\d+\.?\d*', cleaned)
+        if not match:
+            raise ValueError
+
+        amount = float(match.group())
         if amount <= 0:
-            raise ValueError("Сумма должна быть положительной")
+            raise ValueError
 
         data = await state.get_data()
         tid = data.get("ticket_id")
         complete_ticket(tid, amount)
         
-        await message.answer(f"✅ Заявка #{tid} успешно оплачена на {amount} USDT.")
+        await message.answer(f"✅ Заявка #{tid} успешно оплачена на {amount} USDT!")
         await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
         await state.clear()
         
     except:
-        await message.answer("❌ Неверная сумма! Введите число, например:\n4\n5.5\n10")
-        # Важно: НЕ очищаем состояние при ошибке
+        await message.answer(
+            "❌ Неверная сумма!\n\n"
+            "Введите просто число:\n"
+            "<b>4</b>\n"
+            "<b>5.5</b>\n"
+            "<b>10</b>",
+            parse_mode="HTML"
+        )
+        # Состояние НЕ очищается — бот продолжает ждать
 
-# ==================== Админ: Отмена, Код и т.д. ====================
+# ==================== Остальное ====================
 @dp.callback_query(F.data.startswith("admin_cancel:"))
 async def admin_cancel(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
@@ -349,11 +336,6 @@ async def tab_command(message: Message):
         kb.append([InlineKeyboardButton(text=f"💰 Выплатить #{tid}", callback_data=f"pay_withdraw:{tid}")])
     
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
-
-@dp.callback_query(F.data.startswith("pay_withdraw:"))
-async def pay_withdraw_inline(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID: return
-    await call.answer("Используй кнопку 'Я оплатил'")
 
 @dp.message(F.from_user.id == ADMIN_ID, Command("admin"))
 async def toggle_admin(message: Message):
