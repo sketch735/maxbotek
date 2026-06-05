@@ -41,3 +41,12 @@ def admin_withdraw_keyboard(ticket_id: int):
         [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"paid:{ticket_id}")],
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_cancel:{ticket_id}")]
     ])
+
+def card_type_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1️⃣ Т-Банк", callback_data="card_type:tbank")],
+        [InlineKeyboardButton(text="2️⃣ Альфа-Банк", callback_data="card_type:alfa")],
+        [InlineKeyboardButton(text="3️⃣ СберБанк", callback_data="card_type:sber")],
+        [InlineKeyboardButton(text="4️⃣ Другая карта", callback_data="card_type:other")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="main")]
+    ])

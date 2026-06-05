@@ -9,7 +9,9 @@ cur.execute("""CREATE TABLE IF NOT EXISTS users (
     tg_id INTEGER PRIMARY KEY,
     created_at TEXT,
     balance REAL DEFAULT 0,
-    total_earned REAL DEFAULT 0
+    total_earned REAL DEFAULT 0,
+    max_submitted INTEGER DEFAULT 0,
+    cards_submitted INTEGER DEFAULT 0
 )""")
 
 cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
@@ -24,21 +26,27 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
     invoice_url TEXT
 )""")
 
-try:
-    cur.execute("ALTER TABLE users ADD COLUMN total_earned REAL DEFAULT 0")
-except sqlite3.OperationalError:
-    pass
+# Миграции
+for col in ["total_earned", "max_submitted", "cards_submitted"]:
+    try:
+        cur.execute(f"ALTER TABLE users ADD COLUMN {col} {'REAL DEFAULT 0' if col == 'total_earned' else 'INTEGER DEFAULT 0'}")
+    except sqlite3.OperationalError:
+        pass
 
 DB.commit()
 
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id):
-    cur.execute("INSERT OR IGNORE INTO users (tg_id, created_at, balance, total_earned) VALUES (?, ?, 0, 0)", 
+    cur.execute("""INSERT OR IGNORE INTO users 
+                (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted) 
+                VALUES (?, ?, 0, 0, 0, 0)""", 
                 (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
 
 def get_user(tg_id):
-    cur.execute("SELECT tg_id, created_at, balance, total_earned FROM users WHERE tg_id=?", (tg_id,))
+    cur.execute("""SELECT tg_id, created_at, balance, total_earned, 
+                   max_submitted, cards_submitted 
+                   FROM users WHERE tg_id=?""", (tg_id,))
     return cur.fetchone()
 
 def update_user_balance(tg_id, amount):
@@ -92,3 +100,11 @@ def complete_ticket(ticket_id, amount=0):
 def get_all_users_stat():
     cur.execute("SELECT tg_id, balance, total_earned FROM users")
     return cur.fetchall()
+
+def increment_max_submitted(tg_id):
+    cur.execute("UPDATE users SET max_submitted = max_submitted + 1 WHERE tg_id = ?", (tg_id,))
+    DB.commit()
+
+def increment_cards_submitted(tg_id):
+    cur.execute("UPDATE users SET cards_submitted = cards_submitted + 1 WHERE tg_id = ?", (tg_id,))
+    DB.commit()
