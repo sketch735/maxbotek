@@ -1,3 +1,4 @@
+# keyboards.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def subscription_keyboard():
@@ -26,15 +27,11 @@ def back_to_main():
     ])
 
 def admin_ticket_keyboard(ticket_id: int, ticket_type: str):
-    # Убрали кнопку "Взять в работу"
     buttons = []
-    
     if ticket_type == "MAX":
         buttons.append([InlineKeyboardButton(text="💬 Запросить код", callback_data=f"ask_code:{ticket_id}")])
-    
     buttons.append([InlineKeyboardButton(text="✅ Подтвердить и начислить", callback_data=f"done:{ticket_id}")])
     buttons.append([InlineKeyboardButton(text="❌ Отменить заявку", callback_data=f"admin_cancel:{ticket_id}")])
-    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_withdraw_keyboard(ticket_id: int):
@@ -43,11 +40,12 @@ def admin_withdraw_keyboard(ticket_id: int):
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_cancel:{ticket_id}")]
     ])
 
-def card_type_keyboard():
+def withdraw_amounts_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="1️⃣ Т-Банк", callback_data="card_type:tbank")],
-        [InlineKeyboardButton(text="2️⃣ Альфа-Банк", callback_data="card_type:alfa")],
-        [InlineKeyboardButton(text="3️⃣ СберБанк", callback_data="card_type:sber")],
-        [InlineKeyboardButton(text="4️⃣ Другая карта", callback_data="card_type:other")],
+        [InlineKeyboardButton(text="5 USDT", callback_data="wamt:5"),
+         InlineKeyboardButton(text="10 USDT", callback_data="wamt:10")],
+        [InlineKeyboardButton(text="25 USDT", callback_data="wamt:25"),
+         InlineKeyboardButton(text="50 USDT", callback_data="wamt:50")],
+        [InlineKeyboardButton(text="Другая сумма", callback_data="wamt:custom")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="main")]
     ])

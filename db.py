@@ -1,3 +1,4 @@
+# db.py
 import sqlite3
 from datetime import datetime
 
@@ -12,7 +13,8 @@ cur.execute("""CREATE TABLE IF NOT EXISTS users (
     total_earned REAL DEFAULT 0,
     max_submitted INTEGER DEFAULT 0,
     cards_submitted INTEGER DEFAULT 0,
-    subscribed INTEGER DEFAULT 0
+    subscribed INTEGER DEFAULT 0,
+    username TEXT
 )""")
 
 cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
@@ -32,7 +34,8 @@ for col, col_type in [
     ("total_earned", "REAL DEFAULT 0"),
     ("max_submitted", "INTEGER DEFAULT 0"),
     ("cards_submitted", "INTEGER DEFAULT 0"),
-    ("subscribed", "INTEGER DEFAULT 0")
+    ("subscribed", "INTEGER DEFAULT 0"),
+    ("username", "TEXT")
 ]:
     try:
         cur.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
@@ -42,16 +45,21 @@ for col, col_type in [
 DB.commit()
 
 # ==================== ФУНКЦИИ ====================
-def create_user(tg_id):
-    cur.execute("""INSERT OR IGNORE INTO users 
-                (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted, subscribed) 
-                VALUES (?, ?, 0, 0, 0, 0, 0)""", 
-                (tg_id, datetime.utcnow().isoformat()))
+def create_user(tg_id, username=None):
+    cur.execute("SELECT tg_id FROM users WHERE tg_id = ?", (tg_id,))
+    if not cur.fetchone():
+        cur.execute("""INSERT INTO users 
+                    (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted, subscribed, username) 
+                    VALUES (?, ?, 0, 0, 0, 0, 0, ?)""", 
+                    (tg_id, datetime.utcnow().isoformat(), username))
+    else:
+        if username:
+            cur.execute("UPDATE users SET username = ? WHERE tg_id = ?", (username, tg_id))
     DB.commit()
 
 def get_user(tg_id):
     cur.execute("""SELECT tg_id, created_at, balance, total_earned, 
-                   max_submitted, cards_submitted, subscribed 
+                   max_submitted, cards_submitted, subscribed, username 
                    FROM users WHERE tg_id=?""", (tg_id,))
     return cur.fetchone()
 
@@ -83,9 +91,10 @@ def get_ticket(ticket_id):
 
 def get_pending_withdrawals():
     cur.execute("""
-        SELECT id, user_id, data, invoice_url 
-        FROM tickets 
-        WHERE type='WITHDRAW' AND status='new'
+        SELECT t.id, t.user_id, t.data, t.invoice_url, u.username 
+        FROM tickets t
+        LEFT JOIN users u ON t.user_id = u.tg_id
+        WHERE t.type='WITHDRAW' AND t.status='new'
     """)
     return cur.fetchall()
 
@@ -103,14 +112,16 @@ def reject_ticket_db(ticket_id):
     DB.commit()
 
 def complete_ticket(ticket_id, amount=0):
+    cur.execute("SELECT status, user_id FROM tickets WHERE id=?", (ticket_id,))
+    res = cur.fetchone()
+    if not res or res[0] in ['done', 'rejected']:
+        return False
     cur.execute("UPDATE tickets SET status='done', completed_at=? WHERE id=?", 
                 (datetime.utcnow().isoformat(), ticket_id))
-    if amount > 0:
-        cur.execute("SELECT user_id FROM tickets WHERE id=?", (ticket_id,))
-        result = cur.fetchone()
-        if result:
-            update_user_balance(result[0], amount)
+    if amount > 0 and res[1]:
+        update_user_balance(res[1], amount)
     DB.commit()
+    return True
 
 def increment_max_submitted(tg_id):
     cur.execute("UPDATE users SET max_submitted = max_submitted + 1 WHERE tg_id = ?", (tg_id,))
