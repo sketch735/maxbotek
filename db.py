@@ -11,7 +11,8 @@ cur.execute("""CREATE TABLE IF NOT EXISTS users (
     balance REAL DEFAULT 0,
     total_earned REAL DEFAULT 0,
     max_submitted INTEGER DEFAULT 0,
-    cards_submitted INTEGER DEFAULT 0
+    cards_submitted INTEGER DEFAULT 0,
+    subscribed INTEGER DEFAULT 0
 )""")
 
 cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
@@ -27,9 +28,14 @@ cur.execute("""CREATE TABLE IF NOT EXISTS tickets (
 )""")
 
 # Миграции
-for col in ["total_earned", "max_submitted", "cards_submitted"]:
+for col, col_type in [
+    ("total_earned", "REAL DEFAULT 0"),
+    ("max_submitted", "INTEGER DEFAULT 0"),
+    ("cards_submitted", "INTEGER DEFAULT 0"),
+    ("subscribed", "INTEGER DEFAULT 0")
+]:
     try:
-        cur.execute(f"ALTER TABLE users ADD COLUMN {col} {'REAL DEFAULT 0' if col == 'total_earned' else 'INTEGER DEFAULT 0'}")
+        cur.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
     except sqlite3.OperationalError:
         pass
 
@@ -38,16 +44,25 @@ DB.commit()
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id):
     cur.execute("""INSERT OR IGNORE INTO users 
-                (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted) 
-                VALUES (?, ?, 0, 0, 0, 0)""", 
+                (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted, subscribed) 
+                VALUES (?, ?, 0, 0, 0, 0, 0)""", 
                 (tg_id, datetime.utcnow().isoformat()))
     DB.commit()
 
 def get_user(tg_id):
     cur.execute("""SELECT tg_id, created_at, balance, total_earned, 
-                   max_submitted, cards_submitted 
+                   max_submitted, cards_submitted, subscribed 
                    FROM users WHERE tg_id=?""", (tg_id,))
     return cur.fetchone()
+
+def set_subscribed(tg_id):
+    cur.execute("UPDATE users SET subscribed = 1 WHERE tg_id = ?", (tg_id,))
+    DB.commit()
+
+def is_subscribed(tg_id):
+    cur.execute("SELECT subscribed FROM users WHERE tg_id=?", (tg_id,))
+    result = cur.fetchone()
+    return bool(result and result[0] == 1)
 
 def update_user_balance(tg_id, amount):
     cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, tg_id))
@@ -96,10 +111,6 @@ def complete_ticket(ticket_id, amount=0):
         if result:
             update_user_balance(result[0], amount)
     DB.commit()
-
-def get_all_users_stat():
-    cur.execute("SELECT tg_id, balance, total_earned FROM users")
-    return cur.fetchall()
 
 def increment_max_submitted(tg_id):
     cur.execute("UPDATE users SET max_submitted = max_submitted + 1 WHERE tg_id = ?", (tg_id,))
