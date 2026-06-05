@@ -34,6 +34,12 @@ def admin_ticket_keyboard(ticket_id: int, ticket_type: str):
     buttons.append([InlineKeyboardButton(text="❌ Отменить заявку", callback_data=f"admin_cancel:{ticket_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def admin_code_received_keyboard(ticket_id: int):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Подтвердить сделку", callback_data=f"done:{ticket_id}")],
+        [InlineKeyboardButton(text="❌ Отменить сделку", callback_data=f"admin_cancel:{ticket_id}")]
+    ])
+
 def admin_withdraw_keyboard(ticket_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Я оплатил", callback_data=f"paid:{ticket_id}")],

@@ -20,7 +20,7 @@ from db import (
 from keyboards import (
     user_menu, admin_ticket_keyboard, profile_keyboard,
     back_to_main, subscription_keyboard, admin_withdraw_keyboard,
-    withdraw_amounts_keyboard
+    withdraw_amounts_keyboard, admin_code_received_keyboard
 )
 from services import create_invoice
 
@@ -276,7 +276,7 @@ async def done_callback(call: CallbackQuery):
             increment_max_submitted(t[1])
             await call.message.edit_text(f"✅ Заявка #{tid} (MAX) завершена. Начислено 4.4 USDT.")
             try:
-                await bot.send_message(t[1], f"✅ Ваша заявка #{tid} (MAX) оплачена! +4.4 USDT на баланс.")
+                await bot.send_message(t[1], "✅ Сделка подтверждена.\nВам начислено 4.4 USDT.")
             except Exception:
                 pass
 
@@ -330,8 +330,22 @@ async def code_input(message: Message, state: FSMContext):
     data = await state.get_data()
     tid = data.get("ticket_id")
     if tid:
-        await bot.send_message(ADMIN_ID, f"🔑 Код по заявке #{tid}:\n<code>{message.text}</code>", parse_mode="HTML")
-        await message.answer("✅ Код отправлен!", reply_markup=user_menu())
+        await message.answer(
+            "✅ Код получен.\n"
+            "Ожидайте подтверждения сделки администратором.\n"
+            "После проверки данные будут подтверждены и начисление будет выполнено.",
+            reply_markup=user_menu()
+        )
+        
+        username_str = f"@{message.from_user.username}" if message.from_user.username else "Нет"
+        await bot.send_message(
+            ADMIN_ID,
+            f"🔑 <b>Код по заявке #{tid} (MAX)</b>\n"
+            f"Пользователь: <code>{message.from_user.id}</code> ({username_str})\n"
+            f"Отправленный код: <code>{message.text}</code>",
+            reply_markup=admin_code_received_keyboard(tid),
+            parse_mode="HTML"
+        )
     else:
         await message.answer("❌ Произошла ошибка или сессия устарела.", reply_markup=user_menu())
     await state.clear()
