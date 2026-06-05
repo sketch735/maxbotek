@@ -18,8 +18,7 @@ from db import (
 )
 from keyboards import (
     user_menu, admin_ticket_keyboard, profile_keyboard,
-    back_to_main, subscription_keyboard, admin_withdraw_keyboard,
-    card_type_keyboard
+    back_to_main, subscription_keyboard, admin_withdraw_keyboard
 )
 from services import create_invoice
 
@@ -91,7 +90,7 @@ async def check_subscription(call: CallbackQuery):
         if member.status in ["member", "administrator", "creator"]:
             set_subscribed(call.from_user.id)
             await call.message.edit_text(
-                "✅ <b>Подписка подтверждена!</b>\nДобро пожаловать в главное меню:",
+                "✅ <b>Подписка подтверждена!</b>\nДобро пожаловать!",
                 reply_markup=user_menu(),
                 parse_mode="HTML"
             )
@@ -143,7 +142,7 @@ async def phone_input(message: Message, state: FSMContext):
     )
     await state.clear()
 
-# ==================== Сдача КАРТЫ (упрощено) ====================
+# ==================== Сдача КАРТЫ ====================
 @dp.callback_query(F.data == "card")
 async def process_card(call: CallbackQuery):
     await call.message.edit_text(
@@ -214,8 +213,6 @@ async def done_callback(call: CallbackQuery):
         complete_ticket(tid, amount)
         await call.message.edit_text(f"✅ Заявка #{tid} (MAX) успешно завершена. Начислено 4.4 USDT.")
         await bot.send_message(t[1], f"✅ Ваша заявка #{tid} (MAX) оплачена! На баланс начислено 4.4 USDT.")
-    else:
-        await call.answer("Тип заявки не поддерживается")
     await call.answer("Готово!")
 
 # ==================== Остальные функции ====================
