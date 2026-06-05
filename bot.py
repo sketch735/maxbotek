@@ -35,7 +35,6 @@ CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# ==================== Состояния ====================
 class TicketStates(StatesGroup):
     waiting_phone = State()
     waiting_card_details = State()
@@ -83,7 +82,7 @@ async def start_cmd(message: Message):
     create_user(message.from_user.id)
     await message.answer(
         "🚀 <b>MaxRentik Приветствует!</b>\n\n"
-        "Для работы с нашим ботом, подпишитесь на канал ниже, иначе доступ будет ограничен.",
+        "Для работы с нашим ботом, подпишитесь на канал ниже.",
         reply_markup=subscription_keyboard(),
         parse_mode="HTML"
     )
@@ -140,9 +139,7 @@ async def phone_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
-        f"🆕 Новая заявка #{ticket_id} (MAX)\n"
-        f"Пользователь: <code>{message.from_user.id}</code>\n"
-        f"Данные: {message.text}",
+        f"🆕 Новая заявка #{ticket_id} (MAX)\nПользователь: <code>{message.from_user.id}</code>\nДанные: {message.text}",
         reply_markup=admin_ticket_keyboard(ticket_id, "MAX"), 
         parse_mode="HTML"
     )
@@ -159,7 +156,7 @@ async def card_type_selected(call: CallbackQuery, state: FSMContext):
     names = {"tbank": "Т-Банк", "alfa": "Альфа-Банк", "sber": "СберБанк", "other": "Другая карта"}
     name = names.get(card_type, "Карта")
     await call.message.edit_text(
-        f"💳 Вы выбрали: <b>{name}</b>\n\nВведите реквизиты карты (номер, ФИО и т.д.):",
+        f"💳 Вы выбрали: <b>{name}</b>\n\nВведите реквизиты карты:",
         reply_markup=back_to_main(),
         parse_mode="HTML"
     )
@@ -175,9 +172,7 @@ async def card_details_input(message: Message, state: FSMContext):
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
-        f"🆕 Новая заявка #{ticket_id} (CARD - {card_type})\n"
-        f"Пользователь: <code>{message.from_user.id}</code>\n"
-        f"Данные:\n{full_data}",
+        f"🆕 Новая заявка #{ticket_id} (CARD - {card_type})\nПользователь: <code>{message.from_user.id}</code>\nДанные:\n{full_data}",
         reply_markup=admin_ticket_keyboard(ticket_id, "CARD"), 
         parse_mode="HTML"
     )
@@ -215,10 +210,7 @@ async def withdraw_amount(message: Message, state: FSMContext):
             
             await bot.send_message(
                 ADMIN_ID,
-                f"💰 <b>Заявка на вывод #{ticket_id}</b>\n"
-                f"Пользователь: <code>{message.from_user.id}</code>\n"
-                f"Сумма: {amount} USDT\n"
-                f"Чек: {invoice_url}",
+                f"💰 <b>Заявка на вывод #{ticket_id}</b>\nПользователь: <code>{message.from_user.id}</code>\nСумма: {amount} USDT\nЧек: {invoice_url}",
                 reply_markup=admin_withdraw_keyboard(ticket_id),
                 parse_mode="HTML"
             )
@@ -229,7 +221,7 @@ async def withdraw_amount(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка создания чека.")
     await state.clear()
 
-# ==================== Админ: Начисление суммы ====================
+# ==================== Админ: Начисление суммы (главный фикс) ====================
 @dp.callback_query(F.data.startswith("done:"))
 async def done_callback(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
@@ -237,10 +229,7 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
     t = get_ticket(tid)
     if not t: return await call.answer("Заявка не найдена")
 
-    await call.message.edit_text(
-        f"💰 Введите сумму для начисления по заявке #{tid}\n"
-        f"(просто число, например: 4 или 5.5):"
-    )
+    await call.message.edit_text(f"💰 Введите сумму для заявки #{tid} (например 4 или 5.5):")
     await state.set_state(TicketStates.waiting_card_price)
     await state.update_data(ticket_id=tid)
 
@@ -265,29 +254,20 @@ async def card_price_input(message: Message, state: FSMContext):
         tid = data.get("ticket_id")
         t = get_ticket(tid)
         if t:
-            # Инкремент статистики только после подтверждения
             if t[2] == "MAX":
                 increment_max_submitted(t[1])
             elif t[2] == "CARD":
                 increment_cards_submitted(t[1])
             complete_ticket(tid, amount)
         
-        await message.answer(f"✅ Заявка #{tid} успешно оплачена на {amount} USDT!")
+        await message.answer(f"✅ Заявка #{tid} оплачена на {amount} USDT!")
         await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
         await state.clear()
-        
     except:
-        await message.answer(
-            "❌ Неверная сумма!\n\n"
-            "Введите просто число:\n"
-            "<b>4</b>\n"
-            "<b>5.5</b>\n"
-            "<b>10</b>",
-            parse_mode="HTML"
-        )
-        # НЕ очищаем состояние — продолжаем ждать
+        await message.answer("❌ Неверная сумма! Введите число:\n4\n5.5\n10")
+        # Состояние остаётся — бот ждёт дальше
 
-# ==================== Админ функции ====================
+# ==================== Остальные функции ====================
 @dp.callback_query(F.data.startswith("admin_cancel:"))
 async def admin_cancel(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
@@ -295,7 +275,7 @@ async def admin_cancel(call: CallbackQuery):
     reject_ticket_db(tid)
     t = get_ticket(tid)
     if t and t[1]:
-        await bot.send_message(t[1], f"❌ Заявка #{tid} была отклонена.")
+        await bot.send_message(t[1], f"❌ Заявка #{tid} отклонена.")
     await call.message.edit_text(f"❌ Заявка #{tid} отклонена.")
     await call.answer("Отклонено!")
 
@@ -305,41 +285,31 @@ async def ask_code(call: CallbackQuery, state: FSMContext):
     tid = int(call.data.split(":")[1])
     t = get_ticket(tid)
     if not t: return await call.answer("Заявка не найдена")
-    await bot.send_message(
-        t[1], 
-        "📨 На ваш номер MAX отправлен SMS-код.\nВведите 6-значный код сюда:",
-        reply_markup=back_to_main()
-    )
+    await bot.send_message(t[1], "📨 На ваш номер MAX отправлен SMS.\nВведите 6-значный код:", reply_markup=back_to_main())
     await state.set_state(TicketStates.waiting_code)
     await state.update_data(ticket_id=tid)
-    await call.answer("Запрос отправлен пользователю!")
+    await call.answer("Запрос отправлен!")
 
 @dp.message(TicketStates.waiting_code)
 async def code_input(message: Message, state: FSMContext):
     data = await state.get_data()
     tid = data.get("ticket_id")
     if tid:
-        await bot.send_message(
-            ADMIN_ID,
-            f"🔑 Код от пользователя {message.from_user.id} по заявке #{tid}:\n<code>{message.text}</code>",
-            parse_mode="HTML"
-        )
-        await message.answer("✅ Код успешно отправлен администратору!")
+        await bot.send_message(ADMIN_ID, f"🔑 Код по заявке #{tid}:\n<code>{message.text}</code>", parse_mode="HTML")
+        await message.answer("✅ Код отправлен!")
     await state.clear()
 
 @dp.message(F.from_user.id == ADMIN_ID, Command("tab"))
 async def tab_command(message: Message):
     withdrawals = get_pending_withdrawals()
     if not withdrawals:
-        return await message.answer("📭 Нет активных заявок на вывод.")
-    
+        return await message.answer("📭 Нет заявок на вывод.")
     kb = []
     text = "📋 <b>Заявки на выплату:</b>\n\n"
     for w in withdrawals:
         tid, uid, data, url = w
-        text += f"#{tid} | User: <code>{uid}</code> | {data}\nЧек: {url or 'нет'}\n\n"
+        text += f"#{tid} | User: <code>{uid}</code>\n"
         kb.append([InlineKeyboardButton(text=f"💰 Выплатить #{tid}", callback_data=f"paid:{tid}")])
-    
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
 
 @dp.message(F.from_user.id == ADMIN_ID, Command("admin"))
