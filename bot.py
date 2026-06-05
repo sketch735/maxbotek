@@ -231,7 +231,7 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
     await state.clear()
     try:
         invoice = await create_invoice(amount, f"Вывод #{user_id}")
-        if invoice.get("ok"):
+        if invoice and invoice.get("ok"):
             invoice_url = invoice["result"]["pay_url"]
             ticket_id = create_ticket(user_id, "WITHDRAW", f"Вывод {amount} USDT", invoice_url)
             
@@ -252,9 +252,10 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
                 parse_mode="HTML"
             )
         else:
+            logging.error(f"CryptoBot API Error: {invoice}")
             await message.answer("❌ Ошибка создания чека.")
     except Exception as e:
-        logging.error(f"Invoice error: {e}")
+        logging.error(f"Invoice error: {e}", exc_info=True)
         await message.answer("❌ Ошибка создания чека.")
 
 # ==================== Админ: Действия ====================

@@ -1,3 +1,4 @@
+# services.py
 import aiohttp
 import os
 from dotenv import load_dotenv
@@ -18,7 +19,7 @@ async def create_invoice(amount: float, description: str = ""):
                 "asset": "USDT",
                 "amount": str(amount),
                 "description": description,
-                "paid_btn_name": "open_app",
+                "paid_btn_name": "openBot",
                 "paid_btn_url": "https://t.me/yourbot"
             }
         ) as resp:
