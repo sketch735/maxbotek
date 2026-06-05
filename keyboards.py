@@ -53,5 +53,5 @@ def withdraw_amounts_keyboard():
         [InlineKeyboardButton(text="25 USDT", callback_data="wamt:25"),
          InlineKeyboardButton(text="50 USDT", callback_data="wamt:50")],
         [InlineKeyboardButton(text="Другая сумма", callback_data="wamt:custom")],
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="main")]
+        [InlineKeyboardButton(text="❌ Закрыть", callback_data="main")]
     ])

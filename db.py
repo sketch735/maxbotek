@@ -46,42 +46,32 @@ DB.commit()
 
 # ==================== ФУНКЦИИ ====================
 def create_user(tg_id, username=None):
-    cur.execute("SELECT tg_id FROM users WHERE tg_id = ?", (tg_id,))
+    cur.execute("SELECT tg_id FROM users WHERE tg_id=?", (tg_id,))
     if not cur.fetchone():
-        cur.execute("""INSERT INTO users 
-                    (tg_id, created_at, balance, total_earned, max_submitted, cards_submitted, subscribed, username) 
-                    VALUES (?, ?, 0, 0, 0, 0, 0, ?)""", 
-                    (tg_id, datetime.utcnow().isoformat(), username))
-    else:
-        if username:
-            cur.execute("UPDATE users SET username = ? WHERE tg_id = ?", (username, tg_id))
-    DB.commit()
+        cur.execute(
+            "INSERT INTO users (tg_id, created_at, username) VALUES (?, ?, ?)",
+            (tg_id, datetime.utcnow().isoformat(), username)
+        )
+        DB.commit()
+    elif username:
+        cur.execute("UPDATE users SET username=? WHERE tg_id=?", (username, tg_id))
+        DB.commit()
 
 def get_user(tg_id):
-    cur.execute("""SELECT tg_id, created_at, balance, total_earned, 
-                   max_submitted, cards_submitted, subscribed, username 
-                   FROM users WHERE tg_id=?""", (tg_id,))
+    cur.execute("SELECT tg_id, created_at, balance, total_earned, max_submitted, cards_submitted, subscribed, username FROM users WHERE tg_id=?", (tg_id,))
     return cur.fetchone()
 
-def set_subscribed(tg_id):
-    cur.execute("UPDATE users SET subscribed = 1 WHERE tg_id = ?", (tg_id,))
-    DB.commit()
-
-def is_subscribed(tg_id):
-    cur.execute("SELECT subscribed FROM users WHERE tg_id=?", (tg_id,))
-    result = cur.fetchone()
-    return bool(result and result[0] == 1)
-
 def update_user_balance(tg_id, amount):
-    cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id = ?", (amount, tg_id))
+    cur.execute("UPDATE users SET balance = balance + ? WHERE tg_id=?", (amount, tg_id))
     if amount > 0:
-        cur.execute("UPDATE users SET total_earned = total_earned + ? WHERE tg_id = ?", (amount, tg_id))
+        cur.execute("UPDATE users SET total_earned = total_earned + ? WHERE tg_id=?", (amount, tg_id))
     DB.commit()
 
-def create_ticket(user_id, ttype, data=None, invoice_url=None):
-    cur.execute("""INSERT INTO tickets (user_id, type, data, created_at, invoice_url) 
-                   VALUES (?, ?, ?, ?, ?)""", 
-                (user_id, ttype, data, datetime.utcnow().isoformat(), invoice_url))
+def create_ticket(user_id, ticket_type, data, invoice_url=None):
+    cur.execute(
+        "INSERT INTO tickets (user_id, type, data, invoice_url, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, ticket_type, data, invoice_url, datetime.utcnow().isoformat())
+    )
     DB.commit()
     return cur.lastrowid
 
@@ -124,9 +114,18 @@ def complete_ticket(ticket_id, amount=0):
     return True
 
 def increment_max_submitted(tg_id):
-    cur.execute("UPDATE users SET max_submitted = max_submitted + 1 WHERE tg_id = ?", (tg_id,))
+    cur.execute("UPDATE users SET max_submitted = max_submitted + 1 WHERE tg_id=?", (tg_id,))
     DB.commit()
 
 def increment_cards_submitted(tg_id):
-    cur.execute("UPDATE users SET cards_submitted = cards_submitted + 1 WHERE tg_id = ?", (tg_id,))
+    cur.execute("UPDATE users SET cards_submitted = cards_submitted + 1 WHERE tg_id=?", (tg_id,))
     DB.commit()
+
+def set_subscribed(tg_id, status=1):
+    cur.execute("UPDATE users SET subscribed=? WHERE tg_id=?", (status, tg_id))
+    DB.commit()
+
+def is_subscribed(tg_id):
+    cur.execute("SELECT subscribed FROM users WHERE tg_id=?", (tg_id,))
+    res = cur.fetchone()
+    return res[0] if res else 0
