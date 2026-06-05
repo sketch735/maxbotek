@@ -137,7 +137,6 @@ async def process_max(call: CallbackQuery, state: FSMContext):
 @dp.message(TicketStates.waiting_phone)
 async def phone_input(message: Message, state: FSMContext):
     ticket_id = create_ticket(message.from_user.id, "MAX", f"Телефон: {message.text}")
-    increment_max_submitted(message.from_user.id)
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
@@ -173,7 +172,6 @@ async def card_details_input(message: Message, state: FSMContext):
     card_type = data.get("card_type", "CARD")
     full_data = f"Тип: {card_type}\nРеквизиты: {message.text}"
     ticket_id = create_ticket(message.from_user.id, "CARD", full_data)
-    increment_cards_submitted(message.from_user.id)
     await message.answer(f"✅ Заявка #{ticket_id} создана!", reply_markup=user_menu())
     await bot.send_message(
         ADMIN_ID, 
@@ -231,7 +229,7 @@ async def withdraw_amount(message: Message, state: FSMContext):
         await message.answer("❌ Ошибка создания чека.")
     await state.clear()
 
-# ==================== Админ: Начисление суммы (ФИКС) ====================
+# ==================== Админ: Начисление суммы ====================
 @dp.callback_query(F.data.startswith("done:"))
 async def done_callback(call: CallbackQuery, state: FSMContext):
     if call.from_user.id != ADMIN_ID: return
@@ -241,7 +239,7 @@ async def done_callback(call: CallbackQuery, state: FSMContext):
 
     await call.message.edit_text(
         f"💰 Введите сумму для начисления по заявке #{tid}\n"
-        f"(просто число, например 4 или 5.5):"
+        f"(просто число, например: 4 или 5.5):"
     )
     await state.set_state(TicketStates.waiting_card_price)
     await state.update_data(ticket_id=tid)
@@ -265,7 +263,14 @@ async def card_price_input(message: Message, state: FSMContext):
 
         data = await state.get_data()
         tid = data.get("ticket_id")
-        complete_ticket(tid, amount)
+        t = get_ticket(tid)
+        if t:
+            # Инкремент статистики только после подтверждения
+            if t[2] == "MAX":
+                increment_max_submitted(t[1])
+            elif t[2] == "CARD":
+                increment_cards_submitted(t[1])
+            complete_ticket(tid, amount)
         
         await message.answer(f"✅ Заявка #{tid} успешно оплачена на {amount} USDT!")
         await bot.send_message(ADMIN_ID, f"✅ Заявка #{tid} завершена на {amount} USDT.")
@@ -280,9 +285,9 @@ async def card_price_input(message: Message, state: FSMContext):
             "<b>10</b>",
             parse_mode="HTML"
         )
-        # Состояние НЕ очищается — бот продолжает ждать
+        # НЕ очищаем состояние — продолжаем ждать
 
-# ==================== Остальное ====================
+# ==================== Админ функции ====================
 @dp.callback_query(F.data.startswith("admin_cancel:"))
 async def admin_cancel(call: CallbackQuery):
     if call.from_user.id != ADMIN_ID: return
@@ -333,7 +338,7 @@ async def tab_command(message: Message):
     for w in withdrawals:
         tid, uid, data, url = w
         text += f"#{tid} | User: <code>{uid}</code> | {data}\nЧек: {url or 'нет'}\n\n"
-        kb.append([InlineKeyboardButton(text=f"💰 Выплатить #{tid}", callback_data=f"pay_withdraw:{tid}")])
+        kb.append([InlineKeyboardButton(text=f"💰 Выплатить #{tid}", callback_data=f"paid:{tid}")])
     
     await message.answer(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
 
